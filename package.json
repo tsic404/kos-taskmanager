@@ -1,0 +1,10 @@
+{
+  "name": "kos-taskmanager-shell",
+  "private": true,
+  "type": "module",
+  "description": "Run view window document: ES modules served as they are, no build step and no runtime dependencies.",
+  "scripts": {
+    "check": "node --check assets/app.js",
+    "test": "node --test tests/shell/*.test.js tests/acceptance/*/*.test.js"
+  }
+}
