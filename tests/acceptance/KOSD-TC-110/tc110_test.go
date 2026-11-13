@@ -138,8 +138,8 @@ func TestKOSDTC110ThePackageOwnsNothingADisableCouldStop(t *testing.T) {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	if !reflect.DeepEqual(keys, []string{"apps"}) {
-		t.Fatalf("contributions = %v, want the applications class only", keys)
+	if !reflect.DeepEqual(keys, []string{"apps", "pages"}) {
+		t.Fatalf("contributions = %v, want the applications and pages classes", keys)
 	}
 	keepsApplicationData, declared := true, false
 	for _, entry := range pkg.Manifest.Retention {

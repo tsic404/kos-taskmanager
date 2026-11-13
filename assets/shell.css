@@ -114,3 +114,133 @@ a.nav-entry:focus-visible {
   color: var(--text-muted);
   max-width: 46rem;
 }
+
+.page-state {
+  margin: 0;
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  max-width: 46rem;
+}
+
+.page-state.is-error {
+  border-color: #f85149;
+  color: #ffa198;
+}
+
+.page-reason {
+  margin: 0 0 1rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  max-width: 46rem;
+}
+
+.items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+  max-width: 60rem;
+}
+
+.item {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.item-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.item-label {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.item-source {
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.item-observed {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.item-stale {
+  padding: 0.1rem 0.45rem;
+  border: 1px solid #f0883e;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  color: #f0883e;
+}
+
+.item-figure {
+  margin: 0.6rem 0 0;
+}
+
+.item-rule,
+.item-note {
+  margin: 0.6rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.item-empty {
+  margin: 0.6rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.facts {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.fact {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: baseline;
+  font-size: 0.85rem;
+}
+
+.fact-name {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.fact-state,
+.fact-detail {
+  color: var(--text-muted);
+}
+
+.conditions {
+  list-style: none;
+  margin: 0.2rem 0 0;
+  padding: 0 0 0 0.9rem;
+  border-left: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  flex-basis: 100%;
+}
+
+.item-raw {
+  margin: 0.6rem 0 0;
+  font-size: 0.78rem;
+  overflow-x: auto;
+}
