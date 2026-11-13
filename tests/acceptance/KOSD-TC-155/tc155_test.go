@@ -167,8 +167,9 @@ func TestKOSDTC155ThePackageInstallsAsOneApplication(t *testing.T) {
 		}
 	}
 
-	// One contribution class and no cluster surface: installing or removing the
-	// package cannot touch another product's objects (KOSD-AC-72).
+	// The package contributes the window application and the overview page and
+	// nothing that owns a cluster surface, so installing or removing it cannot
+	// touch another product's objects (KOSD-C-18, KOSD-AC-72).
 	contributions, err := json.Marshal(verified.Manifest.Contributions)
 	if err != nil {
 		t.Fatalf("encode contributions: %v", err)
@@ -177,8 +178,8 @@ func TestKOSDTC155ThePackageInstallsAsOneApplication(t *testing.T) {
 	if err := json.Unmarshal(contributions, &classNames); err != nil {
 		t.Fatalf("decode contributions: %v", err)
 	}
-	if len(classNames) != 1 || classNames["apps"] == nil {
-		t.Fatalf("contributions = %v, want the applications class only", sortedKeys(classNames))
+	if got := sortedKeys(classNames); !reflect.DeepEqual(got, []string{"apps", "pages"}) {
+		t.Fatalf("contributions = %v, want the applications and pages classes", got)
 	}
 }
 
@@ -223,17 +224,33 @@ func TestKOSDTC155TheKernelLoadsThePackedArtifact(t *testing.T) {
 		t.Fatalf("kernel application declares permissions %v, want none", declared.Permissions)
 	}
 
-	// Uninstall withdraws the window: the application contribution keeps no data
-	// (KOSD-C-18, KOSD-AC-72).
-	keep, hasEntry := false, false
-	for _, entry := range loaded.Retention {
-		if entry.Resource == "apps" {
-			keep, hasEntry = entry.Keep, true
-		}
+	// The kernel loads the overview page the package contributes: one read-only
+	// page whose items every session may read (KOSD-C-18, KOSD-F-16).
+	pages := loaded.Contributions.Pages
+	if len(pages) != 1 {
+		t.Fatalf("the kernel loads %d pages, want the overview page", len(pages))
 	}
-	if !hasEntry || keep {
-		t.Fatalf("kernel retention = %+v, want the application contribution removed on uninstall",
-			loaded.Retention)
+	if pages[0].ID != app.PageOverview || !pages[0].ReadOnly || pages[0].ReadOnlyReason == "" {
+		t.Fatalf("kernel page = %+v, want the read-only overview page", pages[0])
+	}
+	if len(pages[0].Items) == 0 {
+		t.Fatal("the loaded overview page declares no item")
+	}
+
+	// Uninstall withdraws the window and the page: neither contribution keeps
+	// data (KOSD-C-18, KOSD-AC-72).
+	kept := map[string]bool{}
+	for _, entry := range loaded.Retention {
+		kept[entry.Resource] = entry.Keep
+	}
+	for _, resource := range []string{"apps", "pages"} {
+		keep, declared := kept[resource]
+		if !declared {
+			t.Fatalf("kernel retention = %+v, want %s removed on uninstall", loaded.Retention, resource)
+		}
+		if keep {
+			t.Fatalf("kernel retention keeps %s on uninstall, want removal", resource)
+		}
 	}
 }
 

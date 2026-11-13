@@ -1,12 +1,19 @@
 // Package app declares the kos-taskmanager extension package: one window
-// application whose document and UI assets ship with the package (KOSD-C-17).
+// application whose document and UI assets ship with the package (KOSD-C-17),
+// the overview page it contributes, and the reader that resolves that page's
+// items (KOSD-C-18, KOSD-C-53).
 //
 // The declaration is the only source of the packed manifest. The packer, the
 // acceptance cases and the shell's navigation all read it here, so the artifact
 // cannot declare one field set while the repository states another.
 package app
 
-import "github.com/tsic404/kos-sdk/manifest"
+import (
+	"encoding/json"
+
+	"github.com/tsic404/kos-sdk/manifest"
+	"github.com/tsic404/kosd/pkg/extension"
+)
 
 const (
 	// Identifier is the extension identity across versions (KOSD-C-17).
@@ -64,15 +71,33 @@ func Declaration() manifest.ExtensionManifest {
 		Version:          Version,
 		FrameworkVersion: FrameworkVersion,
 		Contributions: manifest.Contributions{
-			Apps: []manifest.AppManifest{Manifest()},
+			Pages: pageDocuments(),
+			Apps:  []manifest.AppManifest{Manifest()},
 		},
 		Dependencies:  manifest.Dependencies{},
 		Permissions:   []manifest.ExtensionPermission{},
 		Configuration: manifest.Configuration{},
-		// An App is a declaration, not data: uninstall withdraws the window, so
-		// the application contribution keeps nothing (KOSD-C-18, KOSD-C-29).
+		// A declaration is not data: uninstall withdraws the window and the page
+		// it contributes, so neither keeps anything (KOSD-C-18, KOSD-C-29).
 		Retention: []manifest.Retention{
 			{Resource: "apps", Keep: false},
+			{Resource: "pages", Keep: false},
 		},
 	}
+}
+
+// pageDocuments renders the declared pages into the manifest's page payload,
+// which the SDK validates structurally and the kernel loads by its own field
+// set. Rendering the same Go declaration keeps the shipped manifest and the
+// served page from drifting (KOSD-C-18, KOSD-C-22).
+func pageDocuments() []map[string]any {
+	encoded, err := json.Marshal([]extension.Page{OverviewPage()})
+	if err != nil {
+		panic("app: the page declaration cannot be encoded: " + err.Error())
+	}
+	var documents []map[string]any
+	if err := json.Unmarshal(encoded, &documents); err != nil {
+		panic("app: the page declaration cannot be decoded: " + err.Error())
+	}
+	return documents
 }

@@ -4,11 +4,15 @@ import { escapeHTML } from "./html.js";
 // route table is the single statement of what the window can show, so the
 // navigation, a reload and a deep link resolve to the same page shell.
 
+// page marks a surface the extension declares as a control-plane page: its
+// entry follows the page registry the control plane serves for the session, so
+// an identity that cannot see the page gets neither the entry nor the page
+// (KOSD-C-53, DASH-C-22). The other surfaces are the window's own views.
 export const ROUTES = [
-  { id: "overview", title: "概览", scoped: false },
-  { id: "applications", title: "应用", scoped: false },
-  { id: "detail", title: "应用详情", scoped: true },
-  { id: "pods", title: "Pod 运行态", scoped: true },
+  { id: "overview", title: "概览", scoped: false, page: true },
+  { id: "applications", title: "应用", scoped: false, page: false },
+  { id: "detail", title: "应用详情", scoped: true, page: false },
+  { id: "pods", title: "Pod 运行态", scoped: true, page: false },
 ];
 
 const DEFAULT_ROUTE = ROUTES[0];
@@ -49,9 +53,10 @@ export function routeAddress(route, app = "") {
 
 // renderNav lists every page surface. The application-scoped pages become links
 // once the current address names an application; before that they stay visible
-// but unlinked, so the window never offers a page it cannot fill.
-export function renderNav(currentID, app = "") {
-  const items = ROUTES.map((route) => {
+// but unlinked, so the window never offers a page it cannot fill. A page the
+// identity cannot see is absent from the navigation entirely (DASH-C-22).
+export function renderNav(currentID, app = "", hiddenPages = []) {
+  const items = ROUTES.filter((route) => !isHidden(route, hiddenPages)).map((route) => {
     const label = escapeHTML(route.title);
     const address = routeAddress(route, app);
     if (!address) {
@@ -61,6 +66,12 @@ export function renderNav(currentID, app = "") {
     return `<a class="nav-entry" data-route="${route.id}" href="${address}"${current}>${label}</a>`;
   });
   return `<nav class="nav" aria-label="页面">${items.join("")}</nav>`;
+}
+
+// isHidden reports a page surface the control plane says this identity cannot
+// see; only surfaces that are declared pages can be hidden.
+export function isHidden(route, hiddenPages = []) {
+  return Boolean(route && route.page) && hiddenPages.includes(route.id);
 }
 
 export function defaultHash() {
