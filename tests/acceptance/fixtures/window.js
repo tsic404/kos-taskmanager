@@ -31,7 +31,14 @@ export function bootstrapWindow({
   answer = true,
   init = initMessage(),
 } = {}) {
-  const root = { innerHTML: "", dataset: {} };
+  const rootListeners = new Map();
+  const root = {
+    innerHTML: "",
+    dataset: {},
+    addEventListener(type, handler) {
+      rootListeners.set(type, [...(rootListeners.get(type) || []), handler]);
+    },
+  };
   const document = { getElementById: (id) => (id === "shell" ? root : null) };
   const listeners = new Map();
   const replaced = [];
@@ -67,6 +74,9 @@ export function bootstrapWindow({
     posted,
     dispatch(type, event) {
       for (const handler of listeners.get(type) || []) handler(event);
+    },
+    dispatchRoot(type, event) {
+      for (const handler of rootListeners.get(type) || []) handler(event);
     },
   };
 }

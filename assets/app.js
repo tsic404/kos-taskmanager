@@ -45,12 +45,13 @@ export function renderShell({
   status = "pending",
   hiddenPages = [],
   projection = null,
+  entryNotice = null,
 } = {}) {
   const matched = matchRoute(hash) || { route: ROUTES[0], app: "" };
   const app = matched.app || "";
   const hidden = isHidden(matched.route, hiddenPages);
   const page = PAGES.get(matched.route.id) || overview;
-  const body = hidden ? renderHidden() : page.render({ app, session, projection });
+  const body = hidden ? renderHidden() : page.render({ app, session, projection, entryNotice });
   return `
     <div class="shell">
       <header class="shell-header">
@@ -69,9 +70,11 @@ function renderHidden() {
 }
 
 // defaultHashFor is the address a window without one opens: the first surface
-// the identity may see.
+// the identity may see. A scoped surface has no address without an application,
+// so it is never the default; with no page the identity may see, the window
+// keeps its address and states that the page is unavailable.
 function defaultHashFor(hiddenPages) {
-  const route = ROUTES.find((candidate) => !isHidden(candidate, hiddenPages));
+  const route = ROUTES.find((candidate) => !isHidden(candidate, hiddenPages) && routeAddress(candidate) !== "");
   return route ? routeAddress(route) : defaultHash();
 }
 
@@ -96,7 +99,9 @@ export function createShell({ document, window, fetchFn = null } = {}) {
   let projection = null;
   let registryState = "idle";
   let projectionSeq = 0;
+  let entryNotice = null;
   let pending = Promise.resolve();
+  let writing = Promise.resolve();
 
   function currentRoute() {
     const matched = matchRoute(window.location.hash);
@@ -124,6 +129,7 @@ export function createShell({ document, window, fetchFn = null } = {}) {
       status,
       hiddenPages,
       projection: current,
+      entryNotice,
     });
     root.dataset.state = "ready";
     root.dataset.session = channel.session ? "established" : "none";
@@ -154,7 +160,7 @@ export function createShell({ document, window, fetchFn = null } = {}) {
   // loadProjection reads the page the address names. A page the control plane
   // answers as absent is one the identity cannot see: its entry and its body
   // both go away. Any other failure keeps the entry and states the reason.
-  async function loadProjection() {
+  async function loadProjection({ force = false } = {}) {
     const route = currentRoute();
     if (!api || !route || !route.page) {
       projectionRoute = "";
@@ -168,7 +174,7 @@ export function createShell({ document, window, fetchFn = null } = {}) {
       draw();
       return;
     }
-    if (projectionRoute === route.id && projection && projection.state === "ready") return;
+    if (!force && projectionRoute === route.id && projection && projection.state === "ready") return;
     const seq = ++projectionSeq;
     projectionRoute = route.id;
     projection = { state: "loading" };
@@ -200,15 +206,77 @@ export function createShell({ document, window, fetchFn = null } = {}) {
     refresh().catch(() => draw());
   });
   window.addEventListener("hashchange", () => {
+    entryNotice = null;
     draw();
     if (channel.session) schedule(loadProjection).catch(() => draw());
   });
+
+  // The entry forms are drawn, not bound: one delegated submit listener on the
+  // window root reaches the entry of every page this window re-reads
+  // (KOSD-C-12).
+  if (typeof root.addEventListener === "function") {
+    root.addEventListener("submit", (event) => {
+      const entry = applications.formEntryOf(event && event.target);
+      if (!entry) return;
+      event.preventDefault();
+      const form = event.target;
+      writing = writing.then(() => submitEntry(entry, form)).catch(() => {});
+    });
+  }
+
+  // submitEntry sends one entry with the values the reader holds. The control
+  // plane's answer is kept as it came; the accepted state itself is read back
+  // from the application object by the page read that follows (KOSD-AC-61).
+  async function submitEntry(entry, form) {
+    if (!api) return;
+    entryNotice = null;
+    draw();
+    let request = null;
+    if (entry.item === applications.ITEM_RESOURCE_SPEC) {
+      const current = await api.readResource(applications.entryPath(entry));
+      if (!current.ok) {
+        entryNotice = { kind: "error", label: entry.label, code: current.error.code, message: current.error.message };
+        draw();
+        return;
+      }
+      request = applications.resourceSpecRequest(current.body, entry, applications.valuesOf(form));
+      if (request && request.refused) {
+        entryNotice = { kind: "error", label: entry.label, code: "masked_value", message: request.refused };
+        draw();
+        return;
+      }
+    } else {
+      request = applications.entryRequest(entry, applications.valuesOf(form));
+    }
+    if (!request) {
+      entryNotice = { kind: "error", label: entry.label, code: "invalid_field", message: invalidNote(entry) };
+      draw();
+      return;
+    }
+    const answer = await api.writeEntry(request);
+    if (!answer.ok) {
+      entryNotice = { kind: "error", label: entry.label, code: answer.error.code, message: answer.error.message };
+      draw();
+      return;
+    }
+    entryNotice = { kind: "accepted", label: entry.label };
+    await loadProjection({ force: true });
+  }
+
+  // invalidNote states why a form cannot be submitted as it stands.
+  function invalidNote(entry) {
+    if (entry.item === applications.ITEM_SCALE) return "副本数必须是不小于 0 的整数";
+    if (entry.item === applications.ITEM_UNINSTALL || entry.item === applications.ITEM_RESOURCE_SPEC) {
+      return "缺少对象版本前置条件，请重新读取后再提交";
+    }
+    return "该入口没有可提交的写入";
+  }
 
   // The ready message follows the listener: a console that answers immediately
   // must find the window listening.
   channel.ready();
   draw();
-  return { channel, redraw: draw, settle: () => pending };
+  return { channel, redraw: draw, settle: () => Promise.all([pending, writing]).then(() => {}) };
 }
 
 // connect starts the window document. A module loaded outside a browser (the

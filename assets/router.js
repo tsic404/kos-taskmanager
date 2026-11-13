@@ -10,7 +10,7 @@ import { escapeHTML } from "./html.js";
 // (KOSD-C-53, DASH-C-22). The other surfaces are the window's own views.
 export const ROUTES = [
   { id: "overview", title: "概览", scoped: false, page: true },
-  { id: "applications", title: "应用", scoped: false, page: false },
+  { id: "applications", title: "应用", scoped: false, page: true },
   { id: "detail", title: "应用详情", scoped: true, page: false },
   { id: "pods", title: "Pod 运行态", scoped: true, page: false },
 ];

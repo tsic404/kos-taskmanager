@@ -1,11 +1,16 @@
-// The window's control-plane read path: the two page reads the overview uses,
-// the credential it carries and the failure it reports when the control plane
-// does not answer (KOSD-C-12). The module offers no write call at all.
+// The window's control-plane path: the page reads the shell uses, the
+// credential every call carries, the failure it reports when the control plane
+// does not answer, and the declared entry writes the applications page submits
+// (KOSD-C-12). Reads stay GET; a write carries only the method, path and
+// body its page entry declared.
 
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import { CODE_INVALID_RESPONSE, CODE_UNREACHABLE, createAPI, listPath, readPath } from "../../assets/api.js";
+import { CONTROL_PLANE_FORBIDDEN, CONTROL_PLANE_NOT_FOUND } from "../acceptance/fixtures/applications.js";
+
+const RESOURCE_PATH = "/api/v1/resources/Application/shop?namespace=home";
 
 function recorder(answer) {
   const calls = [];
@@ -49,14 +54,20 @@ test("a base origin is prefixed when the document is served elsewhere", async ()
   assert.equal(calls[0].url, "https://kos.example/api/v1/pages");
 });
 
-test("a failure keeps the control plane's code and message", async () => {
-  const { fetchFn } = recorder(
-    jsonResponse({ code: "not_found", message: "页面不存在，或提供它的组件未生效" }, 404),
-  );
+test("a failure keeps the control plane's code and message from its envelope", async () => {
+  const { fetchFn } = recorder(jsonResponse(CONTROL_PLANE_NOT_FOUND, 404));
   const result = await createAPI({ token: "t", fetchFn }).readPage("absent");
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "not_found");
-  assert.equal(result.error.message, "页面不存在，或提供它的组件未生效");
+  assert.equal(result.error.message, CONTROL_PLANE_NOT_FOUND.error.message);
+});
+
+test("a flat failure body is still readable", async () => {
+  const { fetchFn } = recorder(jsonResponse({ code: "conflict", message: "对象已被其他写入修改" }, 409));
+  const result = await createAPI({ token: "t", fetchFn }).readPage("applications");
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "conflict");
+  assert.equal(result.error.message, "对象已被其他写入修改");
 });
 
 test("a failure without a control-plane body still names the status", async () => {
@@ -81,12 +92,52 @@ test("a body the page cannot read is reported as such", async () => {
   assert.equal(result.error.code, CODE_INVALID_RESPONSE);
 });
 
-test("the module exposes no write path", async () => {
-  const { fetchFn, calls } = recorder(jsonResponse({}));
+test("the reads are GET and the entry write submits the method it is given", async () => {
+  const { fetchFn, calls } = recorder(jsonResponse({ accepted: true }));
   const api = createAPI({ token: "t", fetchFn });
-  assert.deepEqual(Object.keys(api).sort(), ["listPages", "readPage"]);
-  for (const name of Object.keys(api)) {
-    await api[name]("overview");
+
+  await api.listPages();
+  await api.readPage("applications");
+  await api.readResource(RESOURCE_PATH);
+  await api.writeEntry({ method: "PUT", path: RESOURCE_PATH, headers: { "If-Match": "7" }, body: { spec: {} } });
+
+  assert.deepEqual(calls.map((call) => call.options.method), ["GET", "GET", "GET", "PUT"]);
+  assert.deepEqual(calls.map((call) => call.url), [
+    "/api/v1/pages",
+    "/api/v1/pages/applications",
+    RESOURCE_PATH,
+    RESOURCE_PATH,
+  ]);
+  for (const call of calls) {
+    assert.equal(call.options.credentials, "omit");
+    assert.equal(call.options.headers.Authorization, "Bearer t");
   }
-  assert.equal(calls.every((call) => call.options.method === "GET"), true);
+  for (const call of calls.slice(0, 3)) assert.equal(call.options.body, undefined);
+  assert.equal(calls[3].options.headers["If-Match"], "7");
+  assert.equal(calls[3].options.headers["Content-Type"], "application/json");
+  assert.equal(calls[3].options.body, JSON.stringify({ spec: {} }));
+  assert.deepEqual(Object.keys(api).sort(), ["listPages", "readPage", "readResource", "writeEntry"]);
+});
+
+test("a refused write keeps the envelope's code and reason", async () => {
+  const { fetchFn } = recorder(jsonResponse(CONTROL_PLANE_FORBIDDEN, 403));
+  const result = await createAPI({ token: "t", fetchFn }).writeEntry({
+    method: "POST",
+    path: "/api/v1/action-requests",
+    body: { kind: "Application", namespace: "home", name: "shop", action: "stop" },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "permission_denied");
+  assert.equal(result.error.message, CONTROL_PLANE_FORBIDDEN.error.message);
+});
+
+test("a write that never reaches the control plane is unreachable", async () => {
+  const { fetchFn } = recorder(new Error("network down"));
+  const result = await createAPI({ token: "t", fetchFn }).writeEntry({
+    method: "POST",
+    path: "/api/v1/action-requests",
+    body: {},
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, CODE_UNREACHABLE);
 });

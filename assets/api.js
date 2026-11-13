@@ -1,10 +1,10 @@
-// The window document's control-plane read path: the pages a session may see
-// and one page projection (KOSD-C-12, KOSD-C-53). Every call is a GET; the page
-// is read-only and this module offers no write path at all (TASK-C-1).
-//
-// The credential is the application session token the handshake delivered
-// (KOSD-C-75). It stays in memory; no console cookie is sent with a request.
-
+// The window document's control-plane path: the pages a session may see, one
+// page projection and the object read a resource form needs (KOSD-C-12,
+// KOSD-C-53), plus the writes a page's declared entries name — the lifecycle
+// request, the application resource and the version-preconditioned delete
+// (KOSD-C-12, KOSD-C-33, KOSD-C-67). Every call carries the application session
+// token the handshake delivered and nothing else (KOSD-C-75); no console cookie
+// is sent.
 export const API_PREFIX = "/api/v1";
 
 // UNREACHABLE marks a request that never produced a control-plane answer, so
@@ -50,19 +50,52 @@ export function createAPI({ base = "", token = "", fetchFn = globalThis.fetch } 
     return { ok: true, body };
   }
 
+  // sendJSON submits one write the page declared and states its answer as it
+  // came: a refused write keeps the control plane's code and reason instead of
+  // being turned into a page-local verdict (KOSD-C-12).
+  async function sendJSON({ method, path, body, headers = {} }) {
+    const requestHeaders = { Accept: "application/json", Authorization: `Bearer ${token}`, ...headers };
+    if (body !== undefined) requestHeaders["Content-Type"] = "application/json";
+    let response;
+    try {
+      response = await fetchFn(`${base}${path}`, {
+        method,
+        headers: requestHeaders,
+        credentials: "omit",
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } catch (error) {
+      return { ok: false, error: { code: CODE_UNREACHABLE, message: describe(error) } };
+    }
+    const answer = await jsonOf(response);
+    if (!response.ok) {
+      return { ok: false, error: failureOf(answer, response.status) };
+    }
+    return { ok: true, body: answer === null ? {} : answer };
+  }
+
   return {
     // listPages returns the pages this session role may see (DASH-C-22).
     listPages: () => getJSON(listPath()),
     // readPage returns one page projection, trimmed to the session (KOSD-C-59).
     readPage: (id) => getJSON(readPath(id)),
+    // readResource reads one object the declared entries act on; the resource
+    // form starts its write from what this read carries (KOSD-C-67).
+    readResource: (path) => getJSON(path),
+    // writeEntry submits one declared entry and returns its answer unchanged.
+    writeEntry: (request) => sendJSON(request),
   };
 }
 
-// failureOf reads the stable error body KOSD-C-12 fixes; a body without a code
-// still states the HTTP status rather than pretending the read succeeded.
+// failureOf reads the stable failure envelope KOSD-C-12 fixes: the control
+// plane answers a failure as {"error": {code, message, ...}} (its WriteError),
+// so the code and the user-facing reason are one level down. A flat body is
+// still accepted, and a body without a code states the HTTP status rather than
+// pretending the call succeeded.
 function failureOf(body, status) {
-  if (body && typeof body === "object" && typeof body.code === "string" && body.code !== "") {
-    return { code: body.code, message: describeBody(body, status) };
+  const failure = body && typeof body === "object" && body.error && typeof body.error === "object" ? body.error : body;
+  if (failure && typeof failure === "object" && typeof failure.code === "string" && failure.code !== "") {
+    return { code: failure.code, message: describeBody(failure, status) };
   }
   return { code: `http_${status}`, message: `控制面返回 HTTP ${status}` };
 }
