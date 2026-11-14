@@ -63,7 +63,7 @@ func newWorld(t *testing.T) *world {
 		AppliedDigest: "sha256:shop-v1",
 	})
 	fixtures.Endpoint(t, cluster, namespace, "shop-web", "shop", "shop.test")
-	fixtures.BackupPolicy(t, cluster, namespace, "nightly", "shop")
+	fixtures.BackupPolicy(t, cluster, fixtures.BackupPolicyOptions{Namespace: namespace, Name: "nightly", Selector: "app=shop"})
 	fixtures.Application(t, cluster, fixtures.ApplicationOptions{
 		Namespace: namespace, Name: "reports", Owner: owner, DefinitionRef: "reports",
 		Phase: "Failed", Health: string(v1beta1.HealthStateDegraded),

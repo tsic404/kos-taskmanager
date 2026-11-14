@@ -6,9 +6,9 @@ require (
 	github.com/tsic404/kos-dashboard v0.0.0-20261111143455-07e2e997e840
 	github.com/tsic404/kos-sdk v0.0.0-20261113175352-db19ac3e7b97
 	github.com/tsic404/kosd v0.0.0-20261113133102-04c9f121a115
-	k8s.io/api v0.37.1
-	k8s.io/apimachinery v0.37.1
-	k8s.io/client-go v0.37.1
+	k8s.io/api v0.37.2
+	k8s.io/apimachinery v0.37.2
+	k8s.io/client-go v0.37.2
 )
 
 require (

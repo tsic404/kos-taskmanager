@@ -98,6 +98,20 @@ func (r *Readings) value(ctx context.Context, session identity.Session, reader *
 		return r.applicationUsage(ctx, session)
 	case ItemStop, ItemStart, ItemRestart, ItemScale, ItemResourceSpec, ItemUninstall:
 		return entryTargets(ctx, reader, session, item.ID)
+	case ItemDetailHealth:
+		return detailHealthItem(ctx, reader, session)
+	case ItemDetailVolumes:
+		return detailVolumesItem(ctx, reader, session)
+	case ItemDetailIngress:
+		return detailIngressItem(ctx, reader, session)
+	case ItemDetailBackup:
+		return detailBackupItem(ctx, reader, session)
+	case ItemDetailDrift:
+		return detailDriftItem(ctx, reader, session)
+	case ItemDetailEvents:
+		return detailEventsItem(ctx, reader, session)
+	case ItemDetailLogs:
+		return detailLogsItem(ctx, reader, session)
 	default:
 		return nil, &controlplane.Error{
 			Code:        controlplane.CodeInternal,

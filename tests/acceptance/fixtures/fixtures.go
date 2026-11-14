@@ -64,6 +64,10 @@ func Cluster(t *testing.T) dynamic.Interface {
 	// Restart and the other one-shot actions travel as ConfigMap records in the
 	// KOS namespace, so the fake cluster serves that class too (KOSD-C-33).
 	add(schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, "configmaps")
+	// A log read resolves the application's rendered workloads and their Pods,
+	// so the classes KOSD-C-64 reads through are served here (KOSD-C-76).
+	add(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}, "deployments")
+	add(schema.GroupVersionKind{Version: "v1", Kind: "Pod"}, "pods")
 	for _, kind := range api.Kinds() {
 		resource, ok := api.ResourceName(kind)
 		if !ok {
@@ -139,9 +143,20 @@ type ApplicationOptions struct {
 	Finalizers []string
 	// Deleting marks an object the API server is removing: metadata carries a
 	// deletion timestamp and the uninstall gate keeps it observable (KOSD-C-69).
-	Deleting bool
-	// Uninstall is status.uninstall (KOSD-C-33).
+	Deleting  bool
 	Uninstall *v1beta1.UninstallStatus
+	// Labels are metadata.labels, which a backup policy's selector judges
+	// (KOSD-C-41).
+	Labels map[string]string
+	// DriftPolicy is spec.driftPolicy, the arbitration the external-change
+	// record answers (KOSD-C-35).
+	DriftPolicy v1beta1.DriftPolicy
+	// Drift is status.drift: the downstream values an external write changed
+	// (KOSD-C-35).
+	Drift []v1beta1.DriftEntry
+	// Rendered is status.rendered: the objects the last applied render wrote,
+	// which a log read resolves the application's Pods through (KOSD-C-33).
+	Rendered []v1beta1.ObjectRef
 }
 
 // Application writes one application object.
@@ -185,6 +200,20 @@ func Application(t *testing.T, cluster dynamic.Interface, options ApplicationOpt
 	if options.Uninstall != nil {
 		status["uninstall"] = documentOf(t, options.Uninstall)
 	}
+	if options.Drift != nil {
+		entries := make([]any, 0, len(options.Drift))
+		for _, entry := range options.Drift {
+			entries = append(entries, documentOf(t, entry))
+		}
+		status["drift"] = entries
+	}
+	if options.Rendered != nil {
+		rendered := make([]any, 0, len(options.Rendered))
+		for _, ref := range options.Rendered {
+			rendered = append(rendered, documentOf(t, ref))
+		}
+		status["rendered"] = rendered
+	}
 	spec := map[string]any{
 		"owner":         options.Owner,
 		"visibility":    map[string]any{"members": members, "allowGuests": options.AllowGuests},
@@ -203,6 +232,9 @@ func Application(t *testing.T, cluster dynamic.Interface, options ApplicationOpt
 	if options.Resources != nil {
 		spec["resources"] = documentOf(t, options.Resources)
 	}
+	if options.DriftPolicy != "" {
+		spec["driftPolicy"] = string(options.DriftPolicy)
+	}
 	metadata := map[string]any{"namespace": options.Namespace, "name": options.Name}
 	if options.UID != "" {
 		metadata["uid"] = options.UID
@@ -216,6 +248,13 @@ func Application(t *testing.T, cluster dynamic.Interface, options ApplicationOpt
 	}
 	if options.Deleting {
 		metadata["deletionTimestamp"] = Now.UTC().Format(time.RFC3339)
+	}
+	if len(options.Labels) > 0 {
+		labels := make(map[string]any, len(options.Labels))
+		for key, value := range options.Labels {
+			labels[key] = value
+		}
+		metadata["labels"] = labels
 	}
 	create(t, cluster, map[string]any{
 		"apiVersion": api.Group + "/" + v1beta1.GroupVersion.Version,
@@ -411,15 +450,30 @@ func Endpoint(t *testing.T, cluster dynamic.Interface, namespace, name, targetAp
 	})
 }
 
-// BackupPolicy writes one backup policy for an application.
-func BackupPolicy(t *testing.T, cluster dynamic.Interface, namespace, name, targetApp string) {
+// BackupPolicyOptions is one backup policy as a case shapes it.
+type BackupPolicyOptions struct {
+	// Namespace is the policy's namespace.
+	Namespace string
+	// Name is the policy's name.
+	Name string
+	// Selector is the label selector that decides the backup range
+	// (KOSD-C-41).
+	Selector string
+}
+
+// BackupPolicy writes one backup policy over the range its selector covers.
+func BackupPolicy(t *testing.T, cluster dynamic.Interface, options BackupPolicyOptions) {
 	t.Helper()
 	create(t, cluster, map[string]any{
 		"apiVersion": api.Group + "/" + v1beta1.GroupVersion.Version,
 		"kind":       "BackupPolicy",
-		"metadata":   map[string]any{"namespace": namespace, "name": name},
-		"spec":       map[string]any{"targetApp": targetApp, "schedule": "0 3 * * *"},
-		"status":     map[string]any{"phase": "Ready", "health": map[string]any{"state": "Healthy"}},
+		"metadata":   map[string]any{"namespace": options.Namespace, "name": options.Name},
+		"spec": map[string]any{
+			"selector": options.Selector, "schedule": "0 3 * * *",
+			"consistency": "crash-consistent", "retention": map[string]any{"keep": int64(7)},
+			"drill": map[string]any{"enabled": true},
+		},
+		"status": map[string]any{"phase": "Ready", "health": map[string]any{"state": "Healthy"}},
 	})
 }
 
@@ -443,6 +497,44 @@ type EventOptions struct {
 	Message string
 	// LastSeen is when the event last occurred.
 	LastSeen time.Time
+}
+
+// Workload writes one Deployment whose selector matches the Pods a log read
+// resolves through it (KOSD-C-64).
+func Workload(t *testing.T, cluster dynamic.Interface, namespace, name string, selector map[string]string) {
+	t.Helper()
+	jsonSelector := make(map[string]any, len(selector))
+	for key, value := range selector {
+		jsonSelector[key] = value
+	}
+	create(t, cluster, map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"namespace": namespace, "name": name},
+		"spec": map[string]any{
+			"selector": map[string]any{"matchLabels": jsonSelector},
+			"template": map[string]any{"metadata": map[string]any{"labels": jsonSelector}},
+		},
+	})
+}
+
+// Pod writes one Pod with the containers a log read collects (KOSD-C-76).
+func Pod(t *testing.T, cluster dynamic.Interface, namespace, name string, labels map[string]string, containers []string) {
+	t.Helper()
+	declared := make([]any, 0, len(containers))
+	for _, container := range containers {
+		declared = append(declared, map[string]any{"name": container, "image": "busybox"})
+	}
+	jsonLabels := make(map[string]any, len(labels))
+	for key, value := range labels {
+		jsonLabels[key] = value
+	}
+	create(t, cluster, map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"namespace": namespace, "name": name, "labels": jsonLabels},
+		"spec":       map[string]any{"containers": declared},
+	})
 }
 
 // Event writes one cluster event.
@@ -546,6 +638,12 @@ func NewShellAt(t *testing.T, cluster dynamic.Interface, trail *Trail, readAt ti
 		Cluster: cluster, Trail: trail, Registry: registry,
 		Pages: service, API: pages.NewAPI(service).Handler(),
 	}
+}
+
+// OurPackage is this repository's install request (KOSD-C-17).
+func OurPackage(t *testing.T) extension.Request {
+	t.Helper()
+	return product(t)
 }
 
 // product is this repository's install request.
@@ -706,6 +804,10 @@ func resourceOf(object *unstructured.Unstructured) (schema.GroupVersionResource,
 		return schema.GroupVersionResource{Version: "v1", Resource: "nodes"}, nil
 	case "Event":
 		return schema.GroupVersionResource{Version: "v1", Resource: "events"}, nil
+	case "Deployment":
+		return schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}, nil
+	case "Pod":
+		return schema.GroupVersionResource{Version: "v1", Resource: "pods"}, nil
 	default:
 		resource, _ := api.ResourceName(object.GetKind())
 		return schema.GroupVersionResource{
