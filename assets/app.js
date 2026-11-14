@@ -46,12 +46,13 @@ export function renderShell({
   hiddenPages = [],
   projection = null,
   entryNotice = null,
+  logState = null,
 } = {}) {
   const matched = matchRoute(hash) || { route: ROUTES[0], app: "" };
   const app = matched.app || "";
   const hidden = isHidden(matched.route, hiddenPages);
   const page = PAGES.get(matched.route.id) || overview;
-  const body = hidden ? renderHidden() : page.render({ app, session, projection, entryNotice });
+  const body = hidden ? renderHidden() : page.render({ app, session, projection, entryNotice, logState });
   return `
     <div class="shell">
       <header class="shell-header">
@@ -97,8 +98,10 @@ export function createShell({ document, window, fetchFn = null } = {}) {
   let hiddenPages = [];
   let projectionRoute = "";
   let projection = null;
+  let logState = null;
   let registryState = "idle";
   let projectionSeq = 0;
+  let logSeq = 0;
   let entryNotice = null;
   let pending = Promise.resolve();
   let writing = Promise.resolve();
@@ -117,22 +120,39 @@ export function createShell({ document, window, fetchFn = null } = {}) {
       const next = defaultHashFor(hiddenPages);
       if (next !== window.location.hash) window.location.replace(next);
     }
-    const matched = matchRoute(window.location.hash);
-    const route = matched ? matched.route : ROUTES[0];
+    const matched = matchRoute(window.location.hash) || { route: ROUTES[0], app: "" };
+    const route = matched.route;
+    const app = matched.app || "";
     // A page with a session behind it is reading even before its projection
     // lands, so the window never shows an empty page where a read is running.
     const loaded = projectionRoute === route.id ? projection : null;
     const current = loaded || (channel.session && route.page ? { state: "loading" } : null);
+    // A detail read that carries no row for the addressed application names no
+    // page this session may open, so its entry and body are withdrawn together
+    // (KOSD-C-59, KOSD-AC-16).
+    const absent = absentSurface(route, app, current);
+    const served = absent ? hiddenPages.concat(route.id) : hiddenPages;
     root.innerHTML = renderShell({
       hash: window.location.hash,
       session: channel.session,
       status,
-      hiddenPages,
+      hiddenPages: served,
       projection: current,
       entryNotice,
+      logState: projectionRoute === route.id ? logState : null,
     });
     root.dataset.state = "ready";
     root.dataset.session = channel.session ? "established" : "none";
+  }
+
+  // absentSurface reports a declared page whose read carried no row for the
+  // application the address names. Only detail behaves that way; the other
+  // pages are not scoped to one object.
+  function absentSurface(route, app, projectionState) {
+    const page = route && PAGES.get(route.id);
+    if (!page || typeof page.present !== "function" || app === "") return false;
+    if (!projectionState || projectionState.state !== "ready") return false;
+    return !page.present({ app, projection: projectionState });
   }
 
   // schedule queues one read and keeps the returned promise for the caller that
@@ -165,12 +185,14 @@ export function createShell({ document, window, fetchFn = null } = {}) {
     if (!api || !route || !route.page) {
       projectionRoute = "";
       projection = null;
+      logState = null;
       draw();
       return;
     }
     if (hiddenPages.includes(route.id)) {
       projectionRoute = route.id;
       projection = { state: "hidden" };
+      logState = null;
       draw();
       return;
     }
@@ -178,6 +200,7 @@ export function createShell({ document, window, fetchFn = null } = {}) {
     const seq = ++projectionSeq;
     projectionRoute = route.id;
     projection = { state: "loading" };
+    logState = null;
     draw();
     const result = await api.readPage(route.id);
     if (seq !== projectionSeq || projectionRoute !== route.id) return;
@@ -207,6 +230,7 @@ export function createShell({ document, window, fetchFn = null } = {}) {
   });
   window.addEventListener("hashchange", () => {
     entryNotice = null;
+    logState = null;
     draw();
     if (channel.session) schedule(loadProjection).catch(() => draw());
   });
@@ -215,6 +239,14 @@ export function createShell({ document, window, fetchFn = null } = {}) {
   // window root reaches the entry of every page this window re-reads
   // (KOSD-C-12).
   if (typeof root.addEventListener === "function") {
+    // The log control is drawn, not bound: one delegated listener reaches the
+    // read-source item of every detail page this window renders (KOSD-C-64).
+    root.addEventListener("click", (event) => {
+      const request = detail.logRequestOf(event && event.target);
+      if (!request) return;
+      if (typeof event.preventDefault === "function") event.preventDefault();
+      schedule(() => readLog(request)).catch(() => draw());
+    });
     root.addEventListener("submit", (event) => {
       const entry = applications.formEntryOf(event && event.target);
       if (!entry) return;
@@ -222,6 +254,21 @@ export function createShell({ document, window, fetchFn = null } = {}) {
       const form = event.target;
       writing = writing.then(() => submitEntry(entry, form)).catch(() => {});
     });
+  }
+
+  // readLog reads one application's logs from the address its page row names
+  // and keeps the answer for the log item; nothing is stored (KOSD-C-64).
+  async function readLog(request) {
+    if (!api || !request || request.path === "") return;
+    const seq = ++logSeq;
+    logState = { path: request.path, state: "loading" };
+    draw();
+    const result = await api.readLog(request.path);
+    if (seq !== logSeq || !logState || logState.path !== request.path) return;
+    logState = result.ok
+      ? { path: request.path, state: "ready", read: result.body }
+      : { path: request.path, state: "error", error: result.error };
+    draw();
   }
 
   // submitEntry sends one entry with the values the reader holds. The control

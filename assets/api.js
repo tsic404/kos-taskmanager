@@ -82,6 +82,9 @@ export function createAPI({ base = "", token = "", fetchFn = globalThis.fetch } 
     // readResource reads one object the declared entries act on; the resource
     // form starts its write from what this read carries (KOSD-C-67).
     readResource: (path) => getJSON(path),
+    // readLog reads one application's logs from the address its page row names
+    // (KOSD-C-64). The read happens now and its result is not stored.
+    readLog: (path) => getJSON(path),
     // writeEntry submits one declared entry and returns its answer unchanged.
     writeEntry: (request) => sendJSON(request),
   };

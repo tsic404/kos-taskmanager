@@ -10,6 +10,7 @@
 // never from a task record (KOSD-C-12, KOSD-AC-61). No upgrade or update prompt
 // lives here (APPSTORE-C-79, APPSTORE-C-80).
 import { escapeHTML } from "../html.js";
+import { detailAddress } from "../router.js";
 
 export const id = "applications";
 export const title = "应用";
@@ -265,8 +266,18 @@ function applicationFact(row, entries) {
       ${replicas === null ? "" : `<span class="fact-detail" data-replicas="${replicas}">副本 ${replicas}</span>`}
       ${conditions.length === 0 ? "" : `<ul class="conditions">${conditions.map(conditionFact).join("")}</ul>`}
       ${uninstallFact(row)}
+      ${detailLink(row)}
       ${forms === "" ? "" : `<div class="entries">${forms}</div>`}
     </li>`;
+}
+
+// detailLink opens the application's detail surface. It is a read navigation
+// offered for every row the control plane lists, so it never widens what the
+// session may see (DASH-C-52, KOSD-C-59).
+function detailLink(row) {
+  const identity = joinIdentity(row);
+  if (identity === "") return "";
+  return `<a class="fact-link" data-detail-link="${escapeHTML(identity)}" href="${escapeHTML(detailAddress(identity))}">查看详情</a>`;
 }
 
 // uninstallFact states the uninstall gate: the application stays listed with the
