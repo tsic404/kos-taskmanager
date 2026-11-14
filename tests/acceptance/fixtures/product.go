@@ -79,6 +79,14 @@ type Product struct {
 // middleware. usage may be nil: the metric source is then absent, not zero.
 func NewProduct(t *testing.T, cluster dynamic.Interface, trail *Trail, usage app.UsageSource) *Product {
 	t.Helper()
+	return NewProductWith(t, cluster, trail, usage, nil)
+}
+
+// NewProductWith is NewProduct with the cluster's log endpoint wired, so a case
+// can read one application's logs through the control plane (KOSD-C-64). logs
+// may be nil: the log route is then unserved.
+func NewProductWith(t *testing.T, cluster dynamic.Interface, trail *Trail, usage app.UsageSource, logs controlplane.LogSource) *Product {
+	t.Helper()
 	registry := install(t)
 	audit := &AuditTrail{}
 	readings := &app.Readings{
@@ -95,6 +103,7 @@ func NewProduct(t *testing.T, cluster dynamic.Interface, trail *Trail, usage app
 		Dynamic:    cluster,
 		Authorizer: identity.Authorizer{Policy: &access.Policy{Objects: controlplane.NewClusterSource(cluster)}},
 		Auditor:    audit,
+		Logs:       logs,
 		Now:        func() time.Time { return Now },
 	})
 	if err != nil {
