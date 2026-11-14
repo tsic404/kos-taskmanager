@@ -14,6 +14,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/tsic404/kosd/api"
 	"github.com/tsic404/kosd/api/v1beta1"
+	kosapp "github.com/tsic404/kosd/pkg/app"
 	"github.com/tsic404/kosd/pkg/extension"
 	"github.com/tsic404/kosd/pkg/identity"
 	"github.com/tsic404/kosd/pkg/pages"
@@ -59,6 +61,9 @@ func Cluster(t *testing.T) dynamic.Interface {
 	}
 	add(schema.GroupVersionKind{Version: "v1", Kind: "Node"}, "nodes")
 	add(schema.GroupVersionKind{Version: "v1", Kind: "Event"}, "events")
+	// Restart and the other one-shot actions travel as ConfigMap records in the
+	// KOS namespace, so the fake cluster serves that class too (KOSD-C-33).
+	add(schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, "configmaps")
 	for _, kind := range api.Kinds() {
 		resource, ok := api.ResourceName(kind)
 		if !ok {
@@ -119,6 +124,24 @@ type ApplicationOptions struct {
 	UpgradeTarget string
 	// UpgradeRolledBack marks a requested upgrade the preflight rolled back.
 	UpgradeRolledBack bool
+	// UID is metadata.uid; a one-shot action record is named after it.
+	UID string
+	// Replicas is spec.replicas; nil leaves the count to the package.
+	Replicas *int32
+	// Paused is the stop marker spec.paused (KOSD-C-66).
+	Paused bool
+	// Resources is the CPU and memory specification spec.resources carries
+	// (KOSD-C-67).
+	Resources *v1beta1.ResourceRequirements
+	// ResourceStatus is the projection status.resources carries (KOSD-C-67).
+	ResourceStatus *v1beta1.ResourceStatus
+	// Finalizers are metadata.finalizers; the uninstall gate is one of them.
+	Finalizers []string
+	// Deleting marks an object the API server is removing: metadata carries a
+	// deletion timestamp and the uninstall gate keeps it observable (KOSD-C-69).
+	Deleting bool
+	// Uninstall is status.uninstall (KOSD-C-33).
+	Uninstall *v1beta1.UninstallStatus
 }
 
 // Application writes one application object.
@@ -156,6 +179,12 @@ func Application(t *testing.T, cluster dynamic.Interface, options ApplicationOpt
 			"target": options.UpgradeTarget, "rolledBack": options.UpgradeRolledBack,
 		}
 	}
+	if options.ResourceStatus != nil {
+		status["resources"] = documentOf(t, options.ResourceStatus)
+	}
+	if options.Uninstall != nil {
+		status["uninstall"] = documentOf(t, options.Uninstall)
+	}
 	spec := map[string]any{
 		"owner":         options.Owner,
 		"visibility":    map[string]any{"members": members, "allowGuests": options.AllowGuests},
@@ -165,10 +194,33 @@ func Application(t *testing.T, cluster dynamic.Interface, options ApplicationOpt
 	if options.NamespaceOverride != "" {
 		spec["namespace"] = options.NamespaceOverride
 	}
+	if options.Replicas != nil {
+		spec["replicas"] = *options.Replicas
+	}
+	if options.Paused {
+		spec["paused"] = true
+	}
+	if options.Resources != nil {
+		spec["resources"] = documentOf(t, options.Resources)
+	}
+	metadata := map[string]any{"namespace": options.Namespace, "name": options.Name}
+	if options.UID != "" {
+		metadata["uid"] = options.UID
+	}
+	if len(options.Finalizers) > 0 {
+		finalizers := make([]any, 0, len(options.Finalizers))
+		for _, finalizer := range options.Finalizers {
+			finalizers = append(finalizers, finalizer)
+		}
+		metadata["finalizers"] = finalizers
+	}
+	if options.Deleting {
+		metadata["deletionTimestamp"] = Now.UTC().Format(time.RFC3339)
+	}
 	create(t, cluster, map[string]any{
 		"apiVersion": api.Group + "/" + v1beta1.GroupVersion.Version,
 		"kind":       "Application",
-		"metadata":   map[string]any{"namespace": options.Namespace, "name": options.Name},
+		"metadata":   metadata,
 		"spec":       spec,
 		"status":     status,
 	})
@@ -183,6 +235,156 @@ func Definition(t *testing.T, cluster dynamic.Interface, name, digest, version s
 		"metadata":   map[string]any{"name": name},
 		"spec":       map[string]any{"package": map[string]any{"digest": digest, "version": version}},
 	})
+}
+
+// PublishDefinition republishes one catalogue entry with a new package: a first
+// publish creates it and a later one replaces the version it offers (KOSD-C-32,
+// APPSTORE-C-31).
+func PublishDefinition(t *testing.T, cluster dynamic.Interface, name, digest, version string) {
+	t.Helper()
+	object := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": api.Group + "/" + v1beta1.GroupVersion.Version,
+		"kind":       "ApplicationDefinition",
+		"metadata":   map[string]any{"name": name},
+		"spec":       map[string]any{"package": map[string]any{"digest": digest, "version": version}},
+	}}
+	resource := cluster.Resource(schema.GroupVersionResource{
+		Group: api.Group, Version: v1beta1.GroupVersion.Version, Resource: "applicationdefinitions",
+	})
+	if _, err := resource.Create(context.Background(), object, metav1.CreateOptions{}); err == nil {
+		return
+	} else if !apierrors.IsAlreadyExists(err) {
+		t.Fatalf("publish definition %q: %v", name, err)
+	}
+	current, err := resource.Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("read definition %q: %v", name, err)
+	}
+	updated := current.DeepCopy()
+	if err := unstructured.SetNestedMap(updated.Object, map[string]any{"package": map[string]any{"digest": digest, "version": version}}, "spec"); err != nil {
+		t.Fatalf("shape definition %q: %v", name, err)
+	}
+	if _, err := resource.Update(context.Background(), updated, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("republish definition %q: %v", name, err)
+	}
+}
+
+// ValidDefinition publishes one definition the kernel's own validation accepts:
+// the package digest is computed from the content and the translation template
+// is present (KOSD-C-32). A case that writes an application needs one, because
+// the write validates the definition the application names.
+func ValidDefinition(t *testing.T, cluster dynamic.Interface, name, version, template string) {
+	t.Helper()
+	spec := v1beta1.ApplicationDefinitionSpec{
+		Package:  v1beta1.PackageIdentity{Version: version},
+		Template: template,
+	}
+	digest, err := kosapp.DefinitionDigest(spec)
+	if err != nil {
+		t.Fatalf("digest definition %q: %v", name, err)
+	}
+	spec.Package.Digest = digest
+	if err := kosapp.ValidateDefinition(spec); err != nil {
+		t.Fatalf("definition %q is invalid: %v", name, err)
+	}
+	create(t, cluster, map[string]any{
+		"apiVersion": api.Group + "/" + v1beta1.GroupVersion.Version,
+		"kind":       "ApplicationDefinition",
+		"metadata":   map[string]any{"name": name},
+		"spec":       documentOf(t, spec),
+	})
+}
+
+// DefinitionObject reads one catalogue entry.
+func DefinitionObject(t *testing.T, cluster dynamic.Interface, name string) *unstructured.Unstructured {
+	t.Helper()
+	object, err := cluster.Resource(schema.GroupVersionResource{
+		Group: api.Group, Version: v1beta1.GroupVersion.Version, Resource: "applicationdefinitions",
+	}).Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("read definition %q: %v", name, err)
+	}
+	return object
+}
+
+// ApplicationObject reads one stored application.
+func ApplicationObject(t *testing.T, cluster dynamic.Interface, namespace, name string) *unstructured.Unstructured {
+	t.Helper()
+	object, err := cluster.Resource(schema.GroupVersionResource{
+		Group: api.Group, Version: v1beta1.GroupVersion.Version, Resource: "applications",
+	}).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("read application %s/%s: %v", namespace, name, err)
+	}
+	return object
+}
+
+// Update writes one stored object back, which is how a case shapes the state a
+// reconciler or the API server would leave behind.
+func Update(t *testing.T, cluster dynamic.Interface, object *unstructured.Unstructured) {
+	t.Helper()
+	resource, err := resourceOf(object)
+	if err != nil {
+		t.Fatalf("resolve %s: %v", object.GetKind(), err)
+	}
+	if _, err := cluster.Resource(resource).Namespace(object.GetNamespace()).Update(
+		context.Background(), object, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("update %s/%s: %v", object.GetKind(), object.GetName(), err)
+	}
+}
+
+// BeginUninstall shapes the state the API server and the application reconciler
+// produce while the uninstall gate holds one application: a deletion timestamp,
+// the gate finalizer and the Uninstalling phase with its blocked objects
+// (KOSD-C-33, KOSD-C-69). The fake cluster removes a deleted object at once, so
+// a case stages the gate the real server keeps observable.
+func BeginUninstall(t *testing.T, cluster dynamic.Interface, namespace, name string) {
+	t.Helper()
+	application := ApplicationObject(t, cluster, namespace, name)
+	application.SetDeletionTimestamp(&metav1.Time{Time: Now})
+	application.SetFinalizers(append(application.GetFinalizers(), kosapp.Finalizer))
+	if err := unstructured.SetNestedField(application.Object, string(kosapp.PhaseUninstalling), "status", "phase"); err != nil {
+		t.Fatalf("set the uninstalling phase: %v", err)
+	}
+	if err := unstructured.SetNestedField(application.Object, string(v1beta1.HealthStateUnavailable), "status", "health", "state"); err != nil {
+		t.Fatalf("set the uninstalling health: %v", err)
+	}
+	blocked := []any{map[string]any{
+		"group": "apps", "version": "v1", "kind": "Deployment",
+		"namespace": namespace, "name": name,
+	}}
+	if err := unstructured.SetNestedSlice(application.Object, blocked, "status", "uninstall", "blocked"); err != nil {
+		t.Fatalf("set the uninstall blocked list: %v", err)
+	}
+	Update(t, cluster, application)
+}
+
+// UsageSamples is a metric source stand-in: the samples the case configured, or
+// the failure that disconnects it (TASK-C-2).
+type UsageSamples struct {
+	// Samples are the rows the source answers with.
+	Samples []app.ApplicationUsage
+	// Err makes every read fail, the way a disconnected metric source does.
+	Err error
+}
+
+// Usage implements app.UsageSource.
+func (s UsageSamples) Usage(context.Context, identity.Session) ([]app.ApplicationUsage, error) {
+	if s.Err != nil {
+		return nil, s.Err
+	}
+	return s.Samples, nil
+}
+
+// Failure reads the stable error envelope a control-plane write answers with
+// (KOSD-C-12): the body carries it under "error".
+func Failure(t *testing.T, body map[string]any) map[string]any {
+	t.Helper()
+	failure, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("the answer %v carries no error envelope", body)
+	}
+	return failure
 }
 
 // Volume writes one volume, bound to node when the mobility is node-local.
@@ -481,6 +683,12 @@ func ObjectRefOf(node string) string { return api.Group + "/Node/" + node }
 func create(t *testing.T, cluster dynamic.Interface, object map[string]any) {
 	t.Helper()
 	stored := &unstructured.Unstructured{Object: object}
+	// The API server assigns a resource version to every stored object; the fake
+	// tracker does not, so the fixture assigns the one a precondition compares
+	// against (KOSD-C-12).
+	if stored.GetResourceVersion() == "" {
+		stored.SetResourceVersion("1")
+	}
 	resource, err := resourceOf(stored)
 	if err != nil {
 		t.Fatalf("resolve %s: %v", stored.GetKind(), err)

@@ -224,17 +224,31 @@ func TestKOSDTC155TheKernelLoadsThePackedArtifact(t *testing.T) {
 		t.Fatalf("kernel application declares permissions %v, want none", declared.Permissions)
 	}
 
-	// The kernel loads the overview page the package contributes: one read-only
-	// page whose items every session may read (KOSD-C-18, KOSD-F-16).
+	// The kernel loads the two pages the package contributes: the read-only
+	// overview and the writable application page whose entries every signed-in
+	// role reads but only a writing role acts through (KOSD-C-18, KOSD-F-16,
+	// TASK-C-2).
 	pages := loaded.Contributions.Pages
-	if len(pages) != 1 {
-		t.Fatalf("the kernel loads %d pages, want the overview page", len(pages))
+	if len(pages) != 2 {
+		t.Fatalf("the kernel loads %d pages, want the overview and application pages", len(pages))
 	}
-	if pages[0].ID != app.PageOverview || !pages[0].ReadOnly || pages[0].ReadOnlyReason == "" {
-		t.Fatalf("kernel page = %+v, want the read-only overview page", pages[0])
+	byID := map[string]extension.Page{}
+	for _, page := range pages {
+		byID[page.ID] = page
 	}
-	if len(pages[0].Items) == 0 {
+	overview, found := byID[app.PageOverview]
+	if !found || !overview.ReadOnly || overview.ReadOnlyReason == "" {
+		t.Fatalf("kernel overview page = %+v, want the read-only overview page", overview)
+	}
+	if len(overview.Items) == 0 {
 		t.Fatal("the loaded overview page declares no item")
+	}
+	applications, found := byID[app.PageApplications]
+	if !found || applications.ReadOnly {
+		t.Fatalf("kernel application page = %+v, want the writable application page", applications)
+	}
+	if len(applications.Items) == 0 || len(applications.Actions) == 0 {
+		t.Fatalf("kernel application page = %+v, want items with their entries", applications)
 	}
 
 	// Uninstall withdraws the window and the page: neither contribution keeps

@@ -1,7 +1,7 @@
 // Package app declares the kos-taskmanager extension package: one window
 // application whose document and UI assets ship with the package (KOSD-C-17),
-// the overview page it contributes, and the reader that resolves that page's
-// items (KOSD-C-18, KOSD-C-53).
+// the overview and application pages it contributes, and the reader that
+// resolves those pages' items (KOSD-C-18, KOSD-C-53).
 //
 // The declaration is the only source of the packed manifest. The packer, the
 // acceptance cases and the shell's navigation all read it here, so the artifact
@@ -91,7 +91,7 @@ func Declaration() manifest.ExtensionManifest {
 // set. Rendering the same Go declaration keeps the shipped manifest and the
 // served page from drifting (KOSD-C-18, KOSD-C-22).
 func pageDocuments() []map[string]any {
-	encoded, err := json.Marshal([]extension.Page{OverviewPage()})
+	encoded, err := json.Marshal([]extension.Page{OverviewPage(), ApplicationsPage()})
 	if err != nil {
 		panic("app: the page declaration cannot be encoded: " + err.Error())
 	}

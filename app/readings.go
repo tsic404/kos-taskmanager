@@ -47,7 +47,7 @@ type AuditReader interface {
 	RecentAuditEntriesForObject(ctx context.Context, object string, verbs, results []string, limit int) ([]identity.AuditEntry, error)
 }
 
-// Readings resolves the overview items this product declares (KOSD-C-53): every
+// Readings resolves the items this product's pages declare (KOSD-C-53): every
 // read goes through the control plane's cluster client and is trimmed to the
 // session's visibility (KOSD-C-59, KOSD-C-64).
 type Readings struct {
@@ -55,6 +55,9 @@ type Readings struct {
 	Dynamic dynamic.Interface
 	// Audit judges a node's maintenance origin; nil leaves it unknown.
 	Audit AuditReader
+	// Usage reports resource samples; nil leaves the usage item stating that no
+	// metric source is configured (TASK-C-2).
+	Usage UsageSource
 	// Now supplies the read clock; defaults to time.Now.
 	Now func() time.Time
 }
@@ -87,10 +90,18 @@ func (r *Readings) value(ctx context.Context, session identity.Session, reader *
 		return r.maintenanceOrigins(ctx, reader)
 	case ItemMaintenanceAffected:
 		return maintenanceAffected(ctx, reader, session)
+	case ItemInstalled:
+		return installedApplications(ctx, reader, session)
+	case ItemInstallable:
+		return installableApplications(ctx, reader)
+	case ItemResourceUsage:
+		return r.applicationUsage(ctx, session)
+	case ItemStop, ItemStart, ItemRestart, ItemScale, ItemResourceSpec, ItemUninstall:
+		return entryTargets(ctx, reader, session, item.ID)
 	default:
 		return nil, &controlplane.Error{
 			Code:        controlplane.CodeInternal,
-			Message:     "概览条目 " + item.ID + " 没有来源",
+			Message:     "页面条目 " + item.ID + " 没有来源",
 			Stage:       controlplane.StageRead,
 			SideEffects: controlplane.SideEffectsNone,
 		}
