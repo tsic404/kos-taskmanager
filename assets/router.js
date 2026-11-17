@@ -8,12 +8,13 @@ import { escapeHTML } from "./html.js";
 // entry follows the page registry the control plane serves for the session, so
 // an identity that cannot see the page gets neither the entry nor the page
 // (KOSD-C-53, DASH-C-22). A declared page is also withdrawn with its declaring
-// component (KOSD-AC-54). The remaining surfaces are the window's own views.
+// component (KOSD-AC-54). Every surface of the window is a declared page, so a
+// component that is not active leaves no entry behind (KOSD-F-16).
 export const ROUTES = [
   { id: "overview", title: "概览", scoped: false, page: true },
   { id: "applications", title: "应用", scoped: false, page: true },
   { id: "detail", title: "应用详情", scoped: true, page: true },
-  { id: "pods", title: "Pod 运行态", scoped: true, page: false },
+  { id: "pods", title: "Pod 运行态", scoped: true, page: true },
 ];
 
 const DEFAULT_ROUTE = ROUTES[0];

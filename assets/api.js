@@ -1,10 +1,10 @@
 // The window document's control-plane path: the pages a session may see, one
-// page projection and the object read a resource form needs (KOSD-C-12,
-// KOSD-C-53), plus the writes a page's declared entries name — the lifecycle
-// request, the application resource and the version-preconditioned delete
-// (KOSD-C-12, KOSD-C-33, KOSD-C-67). Every call carries the application session
-// token the handshake delivered and nothing else (KOSD-C-75); no console cookie
-// is sent.
+// page projection, the Pod projection and object read a page row names
+// (KOSD-C-12, KOSD-C-53, KOSD-C-76), plus the writes a page's declared entries
+// name — the lifecycle request, the application resource, the version-
+// preconditioned delete and the single-Pod delete (KOSD-C-12, KOSD-C-33,
+// KOSD-C-67, KOSD-C-77). Every call carries the application session token the
+// handshake delivered and nothing else (KOSD-C-75); no console cookie is sent.
 export const API_PREFIX = "/api/v1";
 
 // UNREACHABLE marks a request that never produced a control-plane answer, so
@@ -82,6 +82,9 @@ export function createAPI({ base = "", token = "", fetchFn = globalThis.fetch } 
     // readResource reads one object the declared entries act on; the resource
     // form starts its write from what this read carries (KOSD-C-67).
     readResource: (path) => getJSON(path),
+    // readPods reads one application's Pod projection from the address its page
+    // row names (KOSD-C-76). The page renders that answer and nothing else.
+    readPods: (path) => getJSON(path),
     // readLog reads one application's logs from the address its page row names
     // (KOSD-C-64). The read happens now and its result is not stored.
     readLog: (path) => getJSON(path),
