@@ -87,6 +87,14 @@ func NewProduct(t *testing.T, cluster dynamic.Interface, trail *Trail, usage app
 // may be nil: the log route is then unserved.
 func NewProductWith(t *testing.T, cluster dynamic.Interface, trail *Trail, usage app.UsageSource, logs controlplane.LogSource) *Product {
 	t.Helper()
+	return NewProductWithSource(t, cluster, trail, usage, logs, nil)
+}
+
+// NewProductWithSource is NewProductWith with the control plane's object source
+// replaced, which is how a case makes the runtime unreachable and restores it
+// (KOSD-C-76, KOSD-C-64). A nil source keeps the live source over the cluster.
+func NewProductWithSource(t *testing.T, cluster dynamic.Interface, trail *Trail, usage app.UsageSource, logs controlplane.LogSource, source controlplane.ObjectSource) *Product {
+	t.Helper()
 	registry := install(t)
 	audit := &AuditTrail{}
 	readings := &app.Readings{
@@ -101,6 +109,7 @@ func NewProductWith(t *testing.T, cluster dynamic.Interface, trail *Trail, usage
 	})
 	server, err := controlplane.New(controlplane.Config{
 		Dynamic:    cluster,
+		Source:     source,
 		Authorizer: identity.Authorizer{Policy: &access.Policy{Objects: controlplane.NewClusterSource(cluster)}},
 		Auditor:    audit,
 		Logs:       logs,
@@ -132,22 +141,33 @@ func NewProductWith(t *testing.T, cluster dynamic.Interface, trail *Trail, usage
 // (KOSD-C-12, KOSD-C-22).
 func PageAction(t *testing.T, product *Product, id, name, namespace string) (string, string) {
 	t.Helper()
-	declared, found := product.Registry.PageFor(app.PageApplications, write.RoleOwner)
+	return PageActionOf(t, product, app.PageApplications, id, map[string]string{"name": name, "namespace": namespace})
+}
+
+// PageActionOf resolves one action the named page declares and fills the
+// placeholders the caller supplies. Taking method and path from the declaration
+// keeps a case from calling an endpoint the page does not offer (KOSD-C-12,
+// KOSD-C-22, KOSD-C-77).
+func PageActionOf(t *testing.T, product *Product, pageID, id string, values map[string]string) (string, string) {
+	t.Helper()
+	declared, found := product.Registry.PageFor(pageID, write.RoleOwner)
 	if !found {
-		t.Fatalf("the installed package declares no page %q", app.PageApplications)
+		t.Fatalf("the installed package declares no page %q", pageID)
 	}
 	for _, action := range declared.Actions {
 		if action.ID != id {
 			continue
 		}
-		path := strings.ReplaceAll(action.Path, "{name}", name)
-		path = strings.ReplaceAll(path, "{namespace}", namespace)
+		path := action.Path
+		for key, value := range values {
+			path = strings.ReplaceAll(path, "{"+key+"}", value)
+		}
 		if strings.ContainsAny(path, "{}") {
 			t.Fatalf("action %q path %q still carries a placeholder", id, path)
 		}
 		return action.Method, path
 	}
-	t.Fatalf("the application page declares no action %q", id)
+	t.Fatalf("page %q declares no action %q", pageID, id)
 	return "", ""
 }
 
@@ -235,7 +255,7 @@ func openAccounts(t *testing.T) (*identity.API, map[string]string) {
 	}
 	owner, ownerToken := signIn(t, service, Owner.Username, bootstrap.OneTimePassword)
 	tokens := map[string]string{owner.Username: ownerToken}
-	for _, account := range []identity.Session{OwningMember, NamedMember, Guest} {
+	for _, account := range []identity.Session{OwningMember, NamedMember, OtherMember, Guest} {
 		initial := firstPassword(account.Username)
 		if _, err := service.CreateAccount(ctx, owner, identity.NewAccount{
 			Username: account.Username, Role: account.Role, OneTimePassword: initial,

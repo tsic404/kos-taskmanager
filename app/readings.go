@@ -112,6 +112,12 @@ func (r *Readings) value(ctx context.Context, session identity.Session, reader *
 		return detailEventsItem(ctx, reader, session)
 	case ItemDetailLogs:
 		return detailLogsItem(ctx, reader, session)
+	case ItemPods:
+		return podProjectionItem(ctx, reader, session)
+	case ItemPodLogs:
+		return podLogsItem(ctx, reader, session)
+	case ItemPodDelete:
+		return podDeleteItem(ctx, reader, session)
 	default:
 		return nil, &controlplane.Error{
 			Code:        controlplane.CodeInternal,

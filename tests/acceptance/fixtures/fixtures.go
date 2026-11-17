@@ -224,7 +224,7 @@ func Application(t *testing.T, cluster dynamic.Interface, options ApplicationOpt
 		spec["namespace"] = options.NamespaceOverride
 	}
 	if options.Replicas != nil {
-		spec["replicas"] = *options.Replicas
+		spec["replicas"] = int64(*options.Replicas)
 	}
 	if options.Paused {
 		spec["paused"] = true
@@ -535,6 +535,97 @@ func Pod(t *testing.T, cluster dynamic.Interface, namespace, name string, labels
 		"metadata":   map[string]any{"namespace": namespace, "name": name, "labels": jsonLabels},
 		"spec":       map[string]any{"containers": declared},
 	})
+}
+
+// PodContainer is one container of a Pod a projection reads (KOSD-C-76).
+type PodContainer struct {
+	// Name is the container name.
+	Name string
+	// Image is the image it runs.
+	Image string
+}
+
+// PodOptions is one Pod with the runtime facts the projection lists: the node,
+// phase, readiness, restart count, containers and start time (KOSD-C-76).
+type PodOptions struct {
+	// Namespace is where the Pod lives.
+	Namespace string
+	// Name is the Pod identity.
+	Name string
+	// Labels are the labels the workload's selector matches.
+	Labels map[string]string
+	// Node is spec.nodeName; empty stays unscheduled as the runtime reports it.
+	Node string
+	// Phase is status.phase.
+	Phase string
+	// Ready is the status of the Pod's Ready condition.
+	Ready bool
+	// Restarts is the restart count the first container reports; the remaining
+	// containers report zero.
+	Restarts int64
+	// Containers are the containers the Pod declares.
+	Containers []PodContainer
+	// StartedAt is status.startTime.
+	StartedAt time.Time
+	// Deleting marks a Pod the runtime is already removing.
+	Deleting bool
+}
+
+// RuntimePod writes one Pod with the status the projection reads, so a case can
+// assert the facts KOSD-C-76 lists instead of only the log targets.
+func RuntimePod(t *testing.T, cluster dynamic.Interface, options PodOptions) {
+	t.Helper()
+	containers := make([]any, 0, len(options.Containers))
+	statuses := make([]any, 0, len(options.Containers))
+	for index, container := range options.Containers {
+		containers = append(containers, map[string]any{"name": container.Name, "image": container.Image})
+		restarts := int64(0)
+		if index == 0 {
+			restarts = options.Restarts
+		}
+		statuses = append(statuses, map[string]any{
+			"name": container.Name, "image": container.Image, "restartCount": restarts,
+		})
+	}
+	jsonLabels := make(map[string]any, len(options.Labels))
+	for key, value := range options.Labels {
+		jsonLabels[key] = value
+	}
+	metadata := map[string]any{"namespace": options.Namespace, "name": options.Name, "labels": jsonLabels}
+	if options.Deleting {
+		metadata["deletionTimestamp"] = Now.UTC().Format(time.RFC3339)
+	}
+	status := map[string]any{
+		"phase":             options.Phase,
+		"containerStatuses": statuses,
+		"conditions": []any{
+			map[string]any{"type": "Ready", "status": readyStatus(options.Ready)},
+		},
+	}
+	if options.Node != "" {
+		status["nodeName"] = options.Node
+	}
+	if !options.StartedAt.IsZero() {
+		status["startTime"] = options.StartedAt.UTC().Format(time.RFC3339Nano)
+	}
+	create(t, cluster, map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   metadata,
+		"spec": map[string]any{
+			"nodeName":   options.Node,
+			"containers": containers,
+		},
+		"status": status,
+	})
+}
+
+// readyStatus renders the Ready condition's status value.
+func readyStatus(ready bool) string {
+	if ready {
+		return string(corev1.ConditionTrue)
+	}
+	return string(corev1.ConditionFalse)
 }
 
 // Event writes one cluster event.

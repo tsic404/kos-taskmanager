@@ -6,6 +6,10 @@
 // The declared pages read their projection from the control plane (KOSD-C-12):
 // the page registry decides which entries the session may see (DASH-C-22) and
 // each page read decides what its items show (KOSD-C-53, KOSD-C-59).
+//
+// Two page sources read a second control-plane answer the page row names: the
+// detail page's log read and the Pod page's Pod projection (KOSD-C-64,
+// KOSD-C-76). Both are read when the page opens and are never assembled here.
 
 import { createAPI } from "./api.js";
 import { createChannel, consoleOriginFrom, windowIDFrom } from "./handshake.js";
@@ -45,6 +49,7 @@ export function renderShell({
   status = "pending",
   hiddenPages = [],
   projection = null,
+  podState = null,
   entryNotice = null,
   logState = null,
 } = {}) {
@@ -52,7 +57,7 @@ export function renderShell({
   const app = matched.app || "";
   const hidden = isHidden(matched.route, hiddenPages);
   const page = PAGES.get(matched.route.id) || overview;
-  const body = hidden ? renderHidden() : page.render({ app, session, projection, entryNotice, logState });
+  const body = hidden ? renderHidden() : page.render({ app, session, projection, entryNotice, logState, podState });
   return `
     <div class="shell">
       <header class="shell-header">
@@ -98,9 +103,12 @@ export function createShell({ document, window, fetchFn = null } = {}) {
   let hiddenPages = [];
   let projectionRoute = "";
   let projection = null;
+  let podState = null;
+  let podRoute = "";
   let logState = null;
   let registryState = "idle";
   let projectionSeq = 0;
+  let podSeq = 0;
   let logSeq = 0;
   let entryNotice = null;
   let pending = Promise.resolve();
@@ -139,6 +147,7 @@ export function createShell({ document, window, fetchFn = null } = {}) {
       hiddenPages: served,
       projection: current,
       entryNotice,
+      podState: podsRoute(route) && podRoute === podsAddress(app) ? podState : null,
       logState: projectionRoute === route.id ? logState : null,
     });
     root.dataset.state = "ready";
@@ -146,13 +155,24 @@ export function createShell({ document, window, fetchFn = null } = {}) {
   }
 
   // absentSurface reports a declared page whose read carried no row for the
-  // application the address names. Only detail behaves that way; the other
-  // pages are not scoped to one object.
+  // application the address names. The detail and Pod pages behave that way; the
+  // other pages are not scoped to one object.
   function absentSurface(route, app, projectionState) {
     const page = route && PAGES.get(route.id);
     if (!page || typeof page.present !== "function" || app === "") return false;
     if (!projectionState || projectionState.state !== "ready") return false;
     return !page.present({ app, projection: projectionState });
+  }
+
+  // podsRoute reports whether one route reads the Pod projection of the
+  // application its address names (KOSD-C-76). Every other surface reads only
+  // its own page projection.
+  function podsRoute(route) {
+    return Boolean(route) && route.id === pods.id;
+  }
+
+  function podsAddress(app) {
+    return app === "" ? "" : routeAddress(ROUTES.find((candidate) => candidate.id === pods.id), app);
   }
 
   // schedule queues one read and keeps the returned promise for the caller that
@@ -185,6 +205,8 @@ export function createShell({ document, window, fetchFn = null } = {}) {
     if (!api || !route || !route.page) {
       projectionRoute = "";
       projection = null;
+      podRoute = "";
+      podState = null;
       logState = null;
       draw();
       return;
@@ -192,11 +214,20 @@ export function createShell({ document, window, fetchFn = null } = {}) {
     if (hiddenPages.includes(route.id)) {
       projectionRoute = route.id;
       projection = { state: "hidden" };
+      podRoute = "";
+      podState = null;
       logState = null;
       draw();
       return;
     }
-    if (!force && projectionRoute === route.id && projection && projection.state === "ready") return;
+    // A page already read is not read again, but the Pod projection below it is
+    // scoped to the addressed application and follows an address change
+    // (KOSD-C-76).
+    if (!force && projectionRoute === route.id && projection && projection.state === "ready") {
+      await loadPods();
+      draw();
+      return;
+    }
     const seq = ++projectionSeq;
     projectionRoute = route.id;
     projection = { state: "loading" };
@@ -212,6 +243,44 @@ export function createShell({ document, window, fetchFn = null } = {}) {
     } else {
       projection = { state: "error", error: result.error };
     }
+    draw();
+    await loadPods();
+  }
+
+  // loadPods reads the Pod projection of the application the address names,
+  // from the address its page row carries (KOSD-C-76). The read is scoped to one
+  // application, keeps its state for that address only, and states a failure as
+  // a reason instead of an empty list (KOSD-C-76, KOSD-C-64).
+  async function loadPods({ force = false } = {}) {
+    const route = currentRoute();
+    if (!api || !podsRoute(route)) {
+      podRoute = "";
+      podState = null;
+      return;
+    }
+    const app = (matchRoute(window.location.hash) || {}).app || "";
+    const address = podsAddress(app);
+    if (app === "" || hiddenPages.includes(route.id)) return;
+    const loaded = projection && projection.state === "ready" ? projection.page : null;
+    const request = loaded ? pods.projectionRequestOf(loaded, app) : null;
+    if (!request) {
+      // A page read that carries no row for this application is one the identity
+      // cannot see; the surface is withdrawn before any Pod read happens.
+      podRoute = address;
+      podState = null;
+      draw();
+      return;
+    }
+    if (!force && podRoute === address && podState && podState.state === "ready") return;
+    const seq = ++podSeq;
+    podRoute = address;
+    podState = { state: "loading" };
+    draw();
+    const result = await api.readPods(request.path);
+    if (seq !== podSeq || podRoute !== address) return;
+    podState = result.ok
+      ? { state: "ready", read: result.body }
+      : { state: "error", error: result.error };
     draw();
   }
 
@@ -242,12 +311,18 @@ export function createShell({ document, window, fetchFn = null } = {}) {
     // The log control is drawn, not bound: one delegated listener reaches the
     // read-source item of every detail page this window renders (KOSD-C-64).
     root.addEventListener("click", (event) => {
-      const request = detail.logRequestOf(event && event.target);
+      const request = detail.logRequestOf(event && event.target) || pods.logRequestOf(event && event.target);
       if (!request) return;
       if (typeof event.preventDefault === "function") event.preventDefault();
       schedule(() => readLog(request)).catch(() => draw());
     });
     root.addEventListener("submit", (event) => {
+      const podEntry = pods.deleteRequestOf(event && event.target);
+      if (podEntry) {
+        event.preventDefault();
+        writing = writing.then(() => submitPodDelete(podEntry)).catch(() => {});
+        return;
+      }
       const entry = applications.formEntryOf(event && event.target);
       if (!entry) return;
       event.preventDefault();
@@ -307,6 +382,25 @@ export function createShell({ document, window, fetchFn = null } = {}) {
       return;
     }
     entryNotice = { kind: "accepted", label: entry.label };
+    await loadProjection({ force: true });
+  }
+
+  // submitPodDelete sends the single-Pod delete the page declared (KOSD-C-77).
+  // The answer is kept as it came; the accepted state itself is read back from
+  // the projection the list comes from, so a refused delete keeps the reason
+  // and a Pod that is gone leaves the list.
+  async function submitPodDelete(entry) {
+    if (!api) return;
+    entryNotice = null;
+    draw();
+    const answer = await api.writeEntry({ method: entry.method, path: entry.path });
+    if (!answer.ok) {
+      entryNotice = { kind: "error", label: entry.label, code: answer.error.code, message: answer.error.message };
+      draw();
+      return;
+    }
+    entryNotice = { kind: "accepted", label: entry.label };
+    podState = null;
     await loadProjection({ force: true });
   }
 

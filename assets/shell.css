@@ -263,6 +263,13 @@ a.nav-entry:focus-visible {
   margin-top: 0.4rem;
 }
 
+.pod-actions {
+  display: grid;
+  gap: 0.4rem;
+  justify-items: start;
+  margin-top: 0.5rem;
+}
+
 .entry {
   display: flex;
   flex-wrap: wrap;

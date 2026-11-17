@@ -99,14 +99,16 @@ test("the reads are GET and the entry write submits the method it is given", asy
   await api.listPages();
   await api.readPage("applications");
   await api.readResource(RESOURCE_PATH);
+  await api.readPods("/api/v1/pods/home/shop");
   await api.readLog("/api/v1/logs/home/shop");
   await api.writeEntry({ method: "PUT", path: RESOURCE_PATH, headers: { "If-Match": "7" }, body: { spec: {} } });
 
-  assert.deepEqual(calls.map((call) => call.options.method), ["GET", "GET", "GET", "GET", "PUT"]);
+  assert.deepEqual(calls.map((call) => call.options.method), ["GET", "GET", "GET", "GET", "GET", "PUT"]);
   assert.deepEqual(calls.map((call) => call.url), [
     "/api/v1/pages",
     "/api/v1/pages/applications",
     RESOURCE_PATH,
+    "/api/v1/pods/home/shop",
     "/api/v1/logs/home/shop",
     RESOURCE_PATH,
   ]);
@@ -114,11 +116,18 @@ test("the reads are GET and the entry write submits the method it is given", asy
     assert.equal(call.options.credentials, "omit");
     assert.equal(call.options.headers.Authorization, "Bearer t");
   }
-  for (const call of calls.slice(0, 4)) assert.equal(call.options.body, undefined);
-  assert.equal(calls[4].options.headers["If-Match"], "7");
-  assert.equal(calls[4].options.headers["Content-Type"], "application/json");
-  assert.equal(calls[4].options.body, JSON.stringify({ spec: {} }));
-  assert.deepEqual(Object.keys(api).sort(), ["listPages", "readLog", "readPage", "readResource", "writeEntry"]);
+  for (const call of calls.slice(0, 5)) assert.equal(call.options.body, undefined);
+  assert.equal(calls[5].options.headers["If-Match"], "7");
+  assert.equal(calls[5].options.headers["Content-Type"], "application/json");
+  assert.equal(calls[5].options.body, JSON.stringify({ spec: {} }));
+  assert.deepEqual(Object.keys(api).sort(), [
+    "listPages",
+    "readLog",
+    "readPage",
+    "readPods",
+    "readResource",
+    "writeEntry",
+  ]);
 });
 
 test("a refused write keeps the envelope's code and reason", async () => {

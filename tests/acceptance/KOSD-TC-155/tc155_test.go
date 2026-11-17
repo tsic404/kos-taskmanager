@@ -224,13 +224,14 @@ func TestKOSDTC155TheKernelLoadsThePackedArtifact(t *testing.T) {
 		t.Fatalf("kernel application declares permissions %v, want none", declared.Permissions)
 	}
 
-	// The kernel loads the three pages the package contributes: the read-only
+	// The kernel loads the four pages the package contributes: the read-only
 	// overview, the writable application page whose entries every signed-in
-	// role reads but only a writing role acts through, and the read-only
-	// detail page (KOSD-C-18, KOSD-F-16, TASK-C-2, DASH-C-52).
+	// role reads but only a writing role acts through, the read-only detail
+	// page and the Pod runtime page with its single-Pod delete
+	// (KOSD-C-18, KOSD-F-16, TASK-C-2, DASH-C-52, TASK-C-3).
 	pages := loaded.Contributions.Pages
-	if len(pages) != 3 {
-		t.Fatalf("the kernel loads %d pages, want the overview, application and detail pages", len(pages))
+	if len(pages) != 4 {
+		t.Fatalf("the kernel loads %d pages, want the overview, application, detail and Pod pages", len(pages))
 	}
 	byID := map[string]extension.Page{}
 	for _, page := range pages {
@@ -256,6 +257,13 @@ func TestKOSDTC155TheKernelLoadsThePackedArtifact(t *testing.T) {
 	}
 	if len(detail.Items) == 0 {
 		t.Fatal("the loaded detail page declares no item")
+	}
+	pods, found := byID[app.PagePods]
+	if !found || pods.ReadOnly {
+		t.Fatalf("kernel Pod page = %+v, want the writable Pod runtime page", pods)
+	}
+	if len(pods.Items) != 3 || len(pods.Actions) != 1 || pods.Actions[0].ID != app.ActionDeletePod {
+		t.Fatalf("kernel Pod page = %+v, want its projection, log and single-Pod delete", pods)
 	}
 
 	// Uninstall withdraws the window and the page: neither contribution keeps
