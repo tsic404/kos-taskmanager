@@ -229,6 +229,16 @@ a.nav-entry:focus-visible {
   color: var(--text-muted);
 }
 
+.fact-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.fact-link:hover,
+.fact-link:focus-visible {
+  text-decoration: underline;
+}
+
 .conditions {
   list-style: none;
   margin: 0.2rem 0 0;
@@ -320,4 +330,31 @@ a.nav-entry:focus-visible {
 
 .usage {
   margin-top: 0.5rem;
+}
+
+.log {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  justify-items: start;
+}
+
+.log-result {
+  display: grid;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.log-truncated {
+  color: #f0883e;
+}
+
+.log-lines {
+  font-size: 0.78rem;
+}
+
+.log-line {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 0.75rem;
 }

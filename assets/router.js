@@ -4,14 +4,15 @@ import { escapeHTML } from "./html.js";
 // route table is the single statement of what the window can show, so the
 // navigation, a reload and a deep link resolve to the same page shell.
 
-// page marks a surface the extension declares as a control-plane page: its
+// page marks a surface this component declares as a control-plane page: its
 // entry follows the page registry the control plane serves for the session, so
 // an identity that cannot see the page gets neither the entry nor the page
-// (KOSD-C-53, DASH-C-22). The other surfaces are the window's own views.
+// (KOSD-C-53, DASH-C-22). A declared page is also withdrawn with its declaring
+// component (KOSD-AC-54). The remaining surfaces are the window's own views.
 export const ROUTES = [
   { id: "overview", title: "概览", scoped: false, page: true },
   { id: "applications", title: "应用", scoped: false, page: true },
-  { id: "detail", title: "应用详情", scoped: true, page: false },
+  { id: "detail", title: "应用详情", scoped: true, page: true },
   { id: "pods", title: "Pod 运行态", scoped: true, page: false },
 ];
 
@@ -49,6 +50,12 @@ export function routeAddress(route, app = "") {
     default:
       return "";
   }
+}
+
+// detailAddress is where one application's detail page lives. The applications
+// surface links a row here, so the entry and the route cannot drift.
+export function detailAddress(app = "") {
+  return routeAddress(routeByID("detail"), app);
 }
 
 // renderNav lists every page surface. The application-scoped pages become links

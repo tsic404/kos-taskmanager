@@ -42,7 +42,7 @@ func newWorld(t *testing.T) *world {
 	fixtures.Definition(t, cluster, "shop", "sha256:shop-v1", "1.0.0")
 	fixtures.Volume(t, cluster, namespace, "data", "cluster-movable", "")
 	fixtures.Endpoint(t, cluster, namespace, "shop-web", "shop", "shop.test")
-	fixtures.BackupPolicy(t, cluster, namespace, "nightly", "shop")
+	fixtures.BackupPolicy(t, cluster, fixtures.BackupPolicyOptions{Namespace: namespace, Name: "nightly", Selector: "app=shop"})
 	fixtures.Application(t, cluster, fixtures.ApplicationOptions{
 		Namespace: namespace, Name: "shop", Owner: owner,
 		Members: []string{"mei"}, AllowGuests: true,
