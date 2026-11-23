@@ -232,6 +232,11 @@ func actionable(item string, application v1beta1.Application) bool {
 		return application.Spec.Paused
 	case ItemRestart:
 		return application.Status.Phase == app.PhaseReady || application.Status.Phase == app.PhaseUpgrading
+	case ItemReinstall:
+		// A crashed provider leaves a Ready application Degraded and a failed
+		// install leaves it Failed; both are reinstalled from the current spec
+		// (KOSD-C-56). An upgrade in flight keeps its own flow (KOSD-C-34).
+		return application.Status.Phase == app.PhaseReady || application.Status.Phase == app.PhaseFailed
 	default:
 		return true
 	}

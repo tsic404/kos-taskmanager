@@ -46,8 +46,8 @@ export const REASONS = {
   usage: "资源占用按指标采样读取，页面不写入",
 };
 
-// ITEM_* are the three display item identities and the six entry identities the
-// page declares (TASK-C-2).
+// ITEM_* are the three display item identities and the seven entry identities
+// the page declares (TASK-C-2).
 export const ITEM_INSTALLED = "installed-applications";
 export const ITEM_INSTALLABLE = "installable-applications";
 export const ITEM_RESOURCE_USAGE = "application-usage";
@@ -57,8 +57,9 @@ export const ITEM_RESTART = "restart-applications";
 export const ITEM_SCALE = "scale-applications";
 export const ITEM_RESOURCE_SPEC = "application-resources";
 export const ITEM_UNINSTALL = "application-uninstall";
+export const ITEM_REINSTALL = "application-reinstall";
 
-// ENTRY_DEFINITIONS are the six entries in declaration order with the control
+// ENTRY_DEFINITIONS are the seven entries in declaration order with the control
 // plane write each one names (KOSD-C-12, KOSD-C-22).
 export const ENTRY_DEFINITIONS = [
   [ITEM_STOP, "停止应用", "stop-application", "POST", "/api/v1/action-requests"],
@@ -67,6 +68,7 @@ export const ENTRY_DEFINITIONS = [
   [ITEM_SCALE, "扩缩容", "scale-application", "POST", "/api/v1/action-requests"],
   [ITEM_RESOURCE_SPEC, "资源规格", "set-application-resources", "PUT", "/api/v1/resources/Application/{name}?namespace={namespace}"],
   [ITEM_UNINSTALL, "卸载应用", "uninstall-application", "DELETE", "/api/v1/resources/Application/{name}?namespace={namespace}"],
+  [ITEM_REINSTALL, "重装应用", "reinstall-application", "POST", "/api/v1/action-requests"],
 ];
 
 // applicationRow is one row of the installed set (TASK-C-2, KOSD-C-33).
@@ -106,7 +108,8 @@ export function target(overrides = {}) {
 }
 
 // defaultTargets is a running application's entries: stop, restart, scale, the
-// resource specification and uninstall apply, start does not (KOSD-C-66).
+// resource specification, uninstall and the crashed-provider reinstall apply,
+// start does not (KOSD-C-56, KOSD-C-66).
 export function defaultTargets() {
   return {
     [ITEM_STOP]: [target()],
@@ -115,6 +118,7 @@ export function defaultTargets() {
     [ITEM_SCALE]: [target()],
     [ITEM_RESOURCE_SPEC]: [target()],
     [ITEM_UNINSTALL]: [target()],
+    [ITEM_REINSTALL]: [target()],
   };
 }
 

@@ -96,7 +96,7 @@ func (r *Readings) value(ctx context.Context, session identity.Session, reader *
 		return installableApplications(ctx, reader)
 	case ItemResourceUsage:
 		return r.applicationUsage(ctx, session)
-	case ItemStop, ItemStart, ItemRestart, ItemScale, ItemResourceSpec, ItemUninstall:
+	case ItemStop, ItemStart, ItemRestart, ItemScale, ItemResourceSpec, ItemUninstall, ItemReinstall:
 		return entryTargets(ctx, reader, session, item.ID)
 	case ItemDetailHealth:
 		return detailHealthItem(ctx, reader, session)

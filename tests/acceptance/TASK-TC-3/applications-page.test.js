@@ -2,7 +2,7 @@
 // display items with the source type, the declared source, the moment each was
 // observed and the control plane's stale verdict (KOSD-C-53, KOSD-C-13); the
 // installed row carries the object's own owner, phase, health, pause and
-// conditions (KOSD-AC-61); and the six entries appear only for the rows their
+// conditions (KOSD-AC-61); and the seven entries appear only for the rows their
 // `applications` target list names, so the two identities without write access
 // see no control at all and a refused direct call states the control plane's
 // answer instead of guessing one (KOSD-C-59, KOSD-AC-16).
@@ -18,6 +18,7 @@ import {
   ITEM_RESOURCE_SPEC,
   ITEM_RESOURCE_USAGE,
   ITEM_RESTART,
+  ITEM_REINSTALL,
   ITEM_SCALE,
   ITEM_START,
   ITEM_STOP,

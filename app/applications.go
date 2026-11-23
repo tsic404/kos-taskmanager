@@ -24,6 +24,7 @@ const (
 	ItemScale         = "scale-applications"
 	ItemResourceSpec  = "application-resources"
 	ItemUninstall     = "application-uninstall"
+	ItemReinstall     = "application-reinstall"
 )
 
 // Action identities of the application page (KOSD-C-22). The browser supplies
@@ -35,6 +36,7 @@ const (
 	ActionScale        = "scale-application"
 	ActionResourceSpec = "set-application-resources"
 	ActionUninstall    = "uninstall-application"
+	ActionReinstall    = "reinstall-application"
 )
 
 // Control-plane paths the entries write through (KOSD-C-12, KOSD-C-22).
@@ -69,6 +71,8 @@ func ControlPlaneAction(id string) (string, bool) {
 		return app.ActionRestart, true
 	case ActionScale:
 		return app.ActionScale, true
+	case ActionReinstall:
+		return app.ActionReinstall, true
 	default:
 		return "", false
 	}
@@ -76,8 +80,9 @@ func ControlPlaneAction(id string) (string, bool) {
 
 // ApplicationsPage declares the application surface TASK-C-2 names: the
 // installed, installable and usage reads, and the stop, start, restart, scale,
-// resource-spec and uninstall entries. It carries no upgrade or update entry:
-// both live in the app center alone (APPSTORE-C-79, APPSTORE-C-80).
+// resource-spec, uninstall and reinstall entries. It carries no upgrade or
+// update entry: both live in the app center alone (APPSTORE-C-79,
+// APPSTORE-C-80).
 func ApplicationsPage() extension.Page {
 	return extension.Page{
 		ID:       PageApplications,
@@ -93,6 +98,7 @@ func ApplicationsPage() extension.Page {
 			{ID: ItemScale, Label: "扩缩容", Source: extension.PageSourceObject, Reference: reference(ItemScale), Action: ActionScale},
 			{ID: ItemResourceSpec, Label: "资源规格", Source: extension.PageSourceObject, Reference: reference(ItemResourceSpec), Action: ActionResourceSpec},
 			{ID: ItemUninstall, Label: "卸载应用", Source: extension.PageSourceObject, Reference: reference(ItemUninstall), Action: ActionUninstall},
+			{ID: ItemReinstall, Label: "重装应用", Source: extension.PageSourceObject, Reference: reference(ItemReinstall), Action: ActionReinstall},
 		},
 		Actions: []extension.Action{
 			{ID: ActionStop, Method: http.MethodPost, Path: PathActionRequests},
@@ -101,6 +107,7 @@ func ApplicationsPage() extension.Page {
 			{ID: ActionScale, Method: http.MethodPost, Path: PathActionRequests},
 			{ID: ActionResourceSpec, Method: http.MethodPut, Path: PathApplications + "/{name}?namespace={namespace}"},
 			{ID: ActionUninstall, Method: http.MethodDelete, Path: PathApplications + "/{name}?namespace={namespace}"},
+			{ID: ActionReinstall, Method: http.MethodPost, Path: PathActionRequests},
 		},
 	}
 }
