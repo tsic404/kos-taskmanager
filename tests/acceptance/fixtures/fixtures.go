@@ -46,38 +46,85 @@ var (
 	Guest        = identity.Session{Username: "guest", Role: write.RoleGuest}
 )
 
+// clusterKind is one object class the fixture cluster serves.
+type clusterKind struct {
+	gvk      schema.GroupVersionKind
+	resource string
+}
+
+// clusterKinds lists every class the fixture cluster serves. The application
+// controller writes downstream objects, reads namespaces and limit ranges, and
+// records events, so those classes are part of the set as well as the page's
+// own reads (KOSD-C-04, KOSD-C-33, KOSD-C-67).
+var clusterKinds = func() []clusterKind {
+	kinds := []clusterKind{
+		{schema.GroupVersionKind{Version: "v1", Kind: "Node"}, "nodes"},
+		{schema.GroupVersionKind{Version: "v1", Kind: "Event"}, "events"},
+		// Restart and the other one-shot actions travel as ConfigMap records in
+		// the KOS namespace (KOSD-C-33).
+		{schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, "configmaps"},
+		// A log read resolves the application's rendered workloads and their
+		// Pods (KOSD-C-64, KOSD-C-76).
+		{schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}, "deployments"},
+		{schema.GroupVersionKind{Version: "v1", Kind: "Pod"}, "pods"},
+		// The application controller checks the declared namespace, reads the
+		// LimitRange an application without resources falls back to, and reads
+		// the claim and volume a declared volume binds (KOSD-C-32, KOSD-C-38,
+		// KOSD-C-67).
+		{schema.GroupVersionKind{Version: "v1", Kind: "Namespace"}, "namespaces"},
+		{schema.GroupVersionKind{Version: "v1", Kind: "LimitRange"}, "limitranges"},
+		{schema.GroupVersionKind{Version: "v1", Kind: "PersistentVolumeClaim"}, "persistentvolumeclaims"},
+		{schema.GroupVersionKind{Version: "v1", Kind: "PersistentVolume"}, "persistentvolumes"},
+	}
+	for _, kind := range api.Kinds() {
+		resource, ok := api.ResourceName(kind)
+		if !ok {
+			panic("kernel kind " + kind + " has no resource name")
+		}
+		kinds = append(kinds, clusterKind{
+			schema.GroupVersionKind{Group: api.Group, Version: v1beta1.GroupVersion.Version, Kind: kind}, resource,
+		})
+	}
+	return kinds
+}()
+
+// ClusterResources is the kind-to-resource map the fixture cluster serves. A
+// case that drives the application reconciler builds its write path over the
+// same set (KOSD-C-04).
+func ClusterResources() map[schema.GroupKind]string {
+	resources := make(map[schema.GroupKind]string, len(clusterKinds))
+	for _, kind := range clusterKinds {
+		resources[kind.gvk.GroupKind()] = kind.resource
+	}
+	return resources
+}
+
 // Cluster builds a fake dynamic client holding the objects the cases shape. The
-// scheme registers every kernel kind and the two native classes the page reads,
-// so a source that lists one is served the stored JSON without a typed round
-// trip.
+// scheme registers every kernel kind and the native classes the pages and the
+// application reconciler read, so a source that lists one is served the stored
+// JSON without a typed round trip.
 func Cluster(t *testing.T) dynamic.Interface {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	lists := map[schema.GroupVersionResource]string{}
-	add := func(gvk schema.GroupVersionKind, resource string) {
-		scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
-		scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind(gvk.Kind+"List"), &unstructured.UnstructuredList{})
-		lists[gvk.GroupVersion().WithResource(resource)] = gvk.Kind + "List"
-	}
-	add(schema.GroupVersionKind{Version: "v1", Kind: "Node"}, "nodes")
-	add(schema.GroupVersionKind{Version: "v1", Kind: "Event"}, "events")
-	// Restart and the other one-shot actions travel as ConfigMap records in the
-	// KOS namespace, so the fake cluster serves that class too (KOSD-C-33).
-	add(schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, "configmaps")
-	// A log read resolves the application's rendered workloads and their Pods,
-	// so the classes KOSD-C-64 reads through are served here (KOSD-C-76).
-	add(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}, "deployments")
-	add(schema.GroupVersionKind{Version: "v1", Kind: "Pod"}, "pods")
-	for _, kind := range api.Kinds() {
-		resource, ok := api.ResourceName(kind)
-		if !ok {
-			t.Fatalf("kernel kind %q has no resource name", kind)
-		}
-		add(schema.GroupVersionKind{
-			Group: api.Group, Version: v1beta1.GroupVersion.Version, Kind: kind,
-		}, resource)
+	for _, kind := range clusterKinds {
+		scheme.AddKnownTypeWithName(kind.gvk, &unstructured.Unstructured{})
+		scheme.AddKnownTypeWithName(kind.gvk.GroupVersion().WithKind(kind.gvk.Kind+"List"), &unstructured.UnstructuredList{})
+		lists[kind.gvk.GroupVersion().WithResource(kind.resource)] = kind.gvk.Kind + "List"
 	}
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, lists)
+}
+
+// Namespace writes one namespace object. The application reconciler refuses an
+// application whose declared namespace does not exist, so a case that drives it
+// creates the namespace first (KOSD-C-32).
+func Namespace(t *testing.T, cluster dynamic.Interface, name string) {
+	t.Helper()
+	create(t, cluster, map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata":   map[string]any{"name": name},
+	})
 }
 
 // Node writes one node with the status the overview reads.
@@ -349,11 +396,22 @@ func DefinitionObject(t *testing.T, cluster dynamic.Interface, name string) *uns
 // ApplicationObject reads one stored application.
 func ApplicationObject(t *testing.T, cluster dynamic.Interface, namespace, name string) *unstructured.Unstructured {
 	t.Helper()
+	return Object(t, cluster, "Application", namespace, name)
+}
+
+// Object reads one stored kernel object by kind, which is how a case checks the
+// identity and the values a reinstall must leave alone (KOSD-C-03).
+func Object(t *testing.T, cluster dynamic.Interface, kind, namespace, name string) *unstructured.Unstructured {
+	t.Helper()
+	resource, known := api.ResourceName(kind)
+	if !known {
+		t.Fatalf("kind %q has no resource name", kind)
+	}
 	object, err := cluster.Resource(schema.GroupVersionResource{
-		Group: api.Group, Version: v1beta1.GroupVersion.Version, Resource: "applications",
+		Group: api.Group, Version: v1beta1.GroupVersion.Version, Resource: resource,
 	}).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
 	if err != nil {
-		t.Fatalf("read application %s/%s: %v", namespace, name, err)
+		t.Fatalf("read %s %s/%s: %v", kind, namespace, name, err)
 	}
 	return object
 }
@@ -899,6 +957,16 @@ func resourceOf(object *unstructured.Unstructured) (schema.GroupVersionResource,
 		return schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}, nil
 	case "Pod":
 		return schema.GroupVersionResource{Version: "v1", Resource: "pods"}, nil
+	case "Namespace":
+		return schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}, nil
+	case "ConfigMap":
+		return schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}, nil
+	case "LimitRange":
+		return schema.GroupVersionResource{Version: "v1", Resource: "limitranges"}, nil
+	case "PersistentVolumeClaim":
+		return schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumeclaims"}, nil
+	case "PersistentVolume":
+		return schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumes"}, nil
 	default:
 		resource, _ := api.ResourceName(object.GetKind())
 		return schema.GroupVersionResource{

@@ -67,6 +67,7 @@ func itemSources() map[string]string {
 		taskapp.ItemScale:         extension.PageSourceObject,
 		taskapp.ItemResourceSpec:  extension.PageSourceObject,
 		taskapp.ItemUninstall:     extension.PageSourceObject,
+		taskapp.ItemReinstall:     extension.PageSourceObject,
 	}
 }
 
@@ -87,10 +88,11 @@ func declaredEntries() map[string]entry {
 		taskapp.ItemScale:        {taskapp.ActionScale, http.MethodPost, taskapp.PathActionRequests},
 		taskapp.ItemResourceSpec: {taskapp.ActionResourceSpec, http.MethodPut, taskapp.PathApplications + "/{name}?namespace={namespace}"},
 		taskapp.ItemUninstall:    {taskapp.ActionUninstall, http.MethodDelete, taskapp.PathApplications + "/{name}?namespace={namespace}"},
+		taskapp.ItemReinstall:    {taskapp.ActionReinstall, http.MethodPost, taskapp.PathActionRequests},
 	}
 }
 
-func TestTASKTC3ThePageDeclaresThreeReadsAndSixEntries(t *testing.T) {
+func TestTASKTC3ThePageDeclaresThreeReadsAndSevenEntries(t *testing.T) {
 	world := newWorld(t)
 
 	declared, found := world.product.Registry.PageFor(taskapp.PageApplications, write.RoleGuest)

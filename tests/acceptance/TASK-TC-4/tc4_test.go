@@ -55,8 +55,8 @@ func TestTASKTC4ThePageDeclaresNoUpgradeEntry(t *testing.T) {
 		t.Fatal("the application page is read-only, so the case cannot tell an absent entry from a page that has none")
 	}
 	// Exactly the entries TASK-C-2 names: an upgrade entry would be one more.
-	if len(declared.Actions) != 6 {
-		t.Fatalf("the page declares %d actions, want the six entries of TASK-C-2", len(declared.Actions))
+	if len(declared.Actions) != 7 {
+		t.Fatalf("the page declares %d actions, want the seven entries of TASK-C-2", len(declared.Actions))
 	}
 	for _, action := range declared.Actions {
 		for _, word := range forbidden {

@@ -44,7 +44,7 @@ export const DISPLAY_ITEMS = [
   "application-usage",
 ];
 
-// ENTRY_ITEMS are the six modification entries in declaration order. The page
+// ENTRY_ITEMS are the seven modification entries in declaration order. The page
 // draws exactly these and nothing else: an entry it does not name — an upgrade
 // entry, for instance — has no control here (TASK-C-2, APPSTORE-C-79).
 export const ENTRY_ITEMS = [
@@ -54,12 +54,14 @@ export const ENTRY_ITEMS = [
   "scale-applications",
   "application-resources",
   "application-uninstall",
+  "application-reinstall",
 ];
 
 // The entry identities the form logic treats specially.
 export const ITEM_SCALE = "scale-applications";
 export const ITEM_RESOURCE_SPEC = "application-resources";
 export const ITEM_UNINSTALL = "application-uninstall";
+export const ITEM_REINSTALL = "application-reinstall";
 
 // DEFAULT_API_VERSION is the kind version the control plane serves; the object
 // read before a resource write carries its own and wins.
@@ -73,6 +75,7 @@ export const ACCEPTED_ACTIONS = {
   "start-application": "start",
   "restart-application": "restart",
   "scale-application": "scale",
+  "reinstall-application": "reinstall",
 };
 
 // PHASE_LABELS and HEALTH_LABELS render the object's own values; an unknown
@@ -231,7 +234,7 @@ function installedValue(value, page) {
   return facts(rows.map((row) => applicationFact(row, entries)));
 }
 
-// entryItemsOf reads the six entry items the page served, with their declared
+// entryItemsOf reads the seven entry items the page served, with their declared
 // write and the applications each one may act on.
 function entryItemsOf(page) {
   const items = Array.isArray(page && page.items) ? page.items : [];
